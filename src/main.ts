@@ -2,6 +2,7 @@ import { pickRegionAtPoint } from './map/arenaBuilder';
 import { fetchWorldCountries, pickWorldCountryAtPoint } from './map/worldLoader';
 import { MapCamera } from './render/camera';
 import { renderRegionalTheater, renderWorldSelectMap } from './render/mapRenderer';
+import { tickAICountries } from './sim/ai';
 import {
   cancelSelectionAndOrderMode,
   orderArmyAttackEnemyArmy,
@@ -14,6 +15,7 @@ import {
 } from './sim/army';
 import { advanceClock, togglePauseSpace } from './sim/calendar';
 import { pushImportantToast, tickEconomyAndQueues } from './sim/economy';
+import { checkEndGameConditions } from './sim/scoring';
 import { createInitialGameState, startGameWithCountry } from './state/gameStore';
 import type { WorldCountryFeature } from './types';
 import { GameUIController } from './ui/windows';
@@ -300,7 +302,9 @@ async function bootstrap(): Promise<void> {
     const dtSimSec = advanceClock(state, dtRealSec);
     if (dtSimSec > 0) {
       tickEconomyAndQueues(state, dtSimSec);
+      tickAICountries(state, dtSimSec);
       tickArmiesCombatAndShips(state, dtSimSec);
+      checkEndGameConditions(state);
     }
 
     ui.syncFrame();

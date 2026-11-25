@@ -3,8 +3,8 @@
 > Bu dosya [DESIGN.md](DESIGN.md) kapsamındaki tüm fazların durumunu takip eder. Her faz tamamlandığında otomatik test + temiz build + `PROGRESS.md` güncellemesi + `git commit` yapılır.
 
 ## Genel Durum
-- **Aktif Faz:** Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu
-- **Tamamlanan Fazlar:** 3 / 5
+- **Aktif Faz:** Faz 5 — Mid-Res Pixel Art, Animasyonlar, Çevre & Müzik
+- **Tamamlanan Fazlar:** 4 / 5
 
 ---
 
@@ -49,12 +49,12 @@
 ---
 
 ## Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu
-- [ ] **Diplomasi UI Penceresi:** Tüm aktif ülkeler listesi, ülke sayfasında anlık ilişki (`Nötr / İttifak / Savaş` + puan) ve **Savaş İlanı, İttifak Teklifi, Barış Teklifi** aksiyonları
-- [ ] Yanlış tıklama koruması (yalnızca savaşta olunan ülkeye saldırı/fetih; müttefik topraklarından serbest geçiş)
-- [ ] **4 Katmanlı İnsan Gibi AI:** `2–4 sn` karar aralığı, 4 kişilik profili (*Saldırgan, Ekonomist/Teknolojici, Fırsatçı, Savunmacı/Diplomat*), sıralı ihtiyaç/ekonomi/üretim yönetimi, sağduyulu savaş/hedef/liman/diplomasi kararları
-- [ ] **Önemli Olay Bildirim Şeridi (Event Toast):** Yalnızca kritik olaylarda (savaş, ittifak, barış, bölge/bina kaybı-fethi, araştırma bitişi) bildirim; rutin eğitim/üretim olaylarında çıkmaması
-- [ ] **Kaybetme & Kazanma Ekranı:** Tüm bölgeleri kaybedince yenilgi; `1 Ocak 2020` tarihinde (veya erken tam fetihte) tüm ülkelerin statlarının karşılaştırıldığı sıralama/skor tablosu ve yeniden oyna akışı
-- [ ] Faz 4 otomatik birim testleri + temiz build + git commit
+- [x] **Diplomasi UI Penceresi:** Tüm aktif ülkeler listesi, ülke sayfasında anlık ilişki (`Nötr / İttifak / Savaş` + puan) ve **Savaş İlanı, İttifak Teklifi, Barış Teklifi** aksiyonları
+- [x] Yanlış tıklama koruması (yalnızca savaşta olunan ülkeye saldırı/fetih; müttefik topraklarından serbest geçiş)
+- [x] **4 Katmanlı İnsan Gibi AI:** `2–4 sn` karar aralığı, 4 kişilik profili (*Saldırgan, Ekonomist/Teknolojici, Fırsatçı, Savunmacı/Diplomat*), sıralı ihtiyaç/ekonomi/üretim yönetimi, sağduyulu savaş/hedef/liman/diplomasi kararları
+- [x] **Önemli Olay Bildirim Şeridi (Event Toast):** Yalnızca kritik olaylarda (savaş, ittifak, barış, bölge/bina kaybı-fethi, araştırma bitişi) bildirim; rutin eğitim/üretim olaylarında çıkmaması
+- [x] **Kaybetme & Kazanma Ekranı:** Tüm bölgeleri kaybedince yenilgi; `1 Ocak 2020` tarihinde (veya erken tam fetihte) tüm ülkelerin statlarının karşılaştırıldığı sıralama/skor tablosu ve yeniden oyna akışı
+- [x] Faz 4 otomatik birim testleri + temiz build + git commit
 
 ---
 

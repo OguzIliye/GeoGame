@@ -96,7 +96,7 @@ body,
 }
 
 .modal-window {
-  width: min(680px, 94vw);
+  width: min(740px, 95vw);
   max-height: calc(100vh - 150px);
   overflow-y: auto;
   font-size: 12px;
@@ -266,4 +266,42 @@ body,
 
 .toast-research {
   border-left-color: #38bdf8;
+}
+
+.endgame-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 25, 41, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.stats-table th,
+.stats-table td {
+  border: 1px solid #334155;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.stats-table th {
+  background: #1e293b;
+  color: #fef08a;
+}
+
+.stats-table tr.player-row {
+  background: rgba(29, 78, 216, 0.35);
+  font-weight: bold;
+}
+
+.stats-table tr.elim-row {
+  opacity: 0.5;
 }

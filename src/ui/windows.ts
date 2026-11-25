@@ -28,6 +28,7 @@ import {
   startCombinedBuildingUpgrade,
   startTechResearch,
 } from '../sim/economy';
+import { computeStandings } from '../sim/scoring';
 import type { BuildingType, GameState, ShieldId, SpeedMultiplier, WeaponId } from '../types';
 
 export type ActiveWindowId =
@@ -84,6 +85,15 @@ export class GameUIController {
       return;
     }
 
+    if (this.state.phase === 'ended') {
+      if (this.mountedPhase !== 'ended') {
+        this.mountedPhase = 'ended';
+        this.activeWindow = null;
+        this.mountEndedScreen();
+      }
+      return;
+    }
+
     if (this.mountedPhase !== 'playing') {
       this.mountedPhase = 'playing';
       this.mountPlayingShell();
@@ -92,6 +102,73 @@ export class GameUIController {
     this.updateLiveHUD();
     this.updateToasts();
     this.updateLiveProgressInsideModal();
+  }
+
+  private mountEndedScreen(): void {
+    const standings = computeStandings(this.state);
+    const playerRow = standings.find((s) => s.isPlayer);
+    let title = '🏁 1 Ocak 2020 — Oyun Sonu Stat Karşılaştırması';
+    let subtitle = playerRow
+      ? playerRow.rank === 1
+        ? '🏆 Tebrikler! En yüksek skorla oyunu 1. sırada kazandınız!'
+        : `Oyun tamamlandı — Sıralamanız: #${playerRow.rank}`
+      : '';
+
+    if (this.state.endReason === 'defeat_eliminated') {
+      title = '💀 YENİLGİ — Tüm Topraklarınızı Kaybettiniz!';
+      subtitle = 'Ülkenizin tüm bölgeleri ele geçirildi.';
+    } else if (this.state.endReason === 'victory_domination') {
+      title = '🏆 ZAFER — Tüm Bölgeye Hakim Oldunuz!';
+      subtitle = 'Bitiş tarihinden önce aktif bölgedeki tüm toprakları birleştirdiniz!';
+    }
+
+    this.root.innerHTML = `
+      <div class="endgame-overlay">
+        <div class="pixel-panel modal-window">
+          <div class="modal-header">
+            <strong>${title}</strong>
+            <button class="pixel-btn" id="btn-play-again">🌍 Yeni Oyun</button>
+          </div>
+          <div class="status-line">${subtitle}</div>
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Ülke</th>
+                <th>Toprak (Bölge)</th>
+                <th>Bina</th>
+                <th>Ordu (Asker / Güç)</th>
+                <th>Teknoloji</th>
+                <th>Ekonomi</th>
+                <th>Toplam Skor</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${standings
+                .map(
+                  (s) => `
+                  <tr class="${s.isPlayer ? 'player-row' : ''} ${s.eliminated ? 'elim-row' : ''}">
+                    <td>${s.rank}</td>
+                    <td>${s.isPlayer ? '★ ' : ''}${s.name}${s.eliminated ? ' (Elendi)' : ''}</td>
+                    <td>${s.regionCount}</td>
+                    <td>${s.buildingCount}</td>
+                    <td>${s.soldierCount} (${s.armyPower})</td>
+                    <td>${s.techTierSum} / 10</td>
+                    <td>${s.money} (+${s.moneyPerSec}/s)</td>
+                    <td>${s.totalScore}</td>
+                  </tr>
+                `,
+                )
+                .join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-play-again')?.addEventListener('click', () => {
+      this.onReturnToWorld();
+    });
   }
 
   setHoveredWorldCountryName(name: string | null): void {
