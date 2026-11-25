@@ -2,8 +2,11 @@ import { pickRegionAtPoint } from './map/arenaBuilder';
 import { fetchWorldCountries, pickWorldCountryAtPoint } from './map/worldLoader';
 import { MapCamera } from './render/camera';
 import { renderRegionalTheater, renderWorldSelectMap } from './render/mapRenderer';
+import { advanceClock, togglePauseSpace } from './sim/calendar';
+import { tickEconomyAndQueues } from './sim/economy';
 import { createInitialGameState, startGameWithCountry } from './state/gameStore';
 import type { WorldCountryFeature } from './types';
+import { GameUIController } from './ui/windows';
 
 const WORLD_BOUNDS = { minX: -172, minY: -86, maxX: 186, maxY: 66 };
 
@@ -17,6 +20,18 @@ async function bootstrap(): Promise<void> {
   const camera = new MapCamera();
   let worldCountries: WorldCountryFeature[] = [];
 
+  const ui = new GameUIController(uiLayer, state, () => {
+    state.phase = 'world_select';
+    state.arena = null;
+    state.countries = {};
+    state.regions = {};
+    state.armies = {};
+    state.ships = {};
+    state.selectedRegionId = null;
+    camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, false);
+    ui.forceRefresh();
+  });
+
   function resize(): void {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -29,66 +44,22 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
-  function renderUI(): void {
-    if (state.phase === 'world_select') {
-      const hovered = worldCountries.find((c) => c.id === state.hoveredWorldCountryId);
-      uiLayer.innerHTML = `
-        <div class="pixel-panel top-banner">
-          <strong>GEOGAME</strong>
-          <span>Başlamak için dünya haritasından bir ülkeye tıklayın</span>
-          ${hovered ? `<span class="badge">${hovered.name}</span>` : ''}
-        </div>
-      `;
-      return;
-    }
-
-    const player = state.playerCountryId ? state.countries[state.playerCountryId] : null;
-    const activeCount = Object.keys(state.countries).length;
-    const regionList = Object.values(state.regions);
-    const playerRegions = regionList.filter((r) => r.ownerId === state.playerCountryId);
-    const selReg = state.selectedRegionId ? state.regions[state.selectedRegionId] : null;
-    const selOwner = selReg ? state.countries[selReg.ownerId] : null;
-
-    uiLayer.innerHTML = `
-      <div class="pixel-panel top-banner">
-        <strong>★ ${player?.name ?? ''}</strong>
-        <span class="badge">${player?.isSmallCountry ? 'Küçük Ülke (Tier 2 Bilim)' : 'Standart Ülke'}</span>
-        <span>Aktif Ülke: ${activeCount} (AI: ${activeCount - 1})</span>
-        <span>Bölgelerin: ${playerRegions.length} / ${regionList.length}</span>
-        <button id="btn-back-world" class="pixel-btn">Harita Seçimine Dön</button>
-      </div>
-      ${
-        selReg
-          ? `
-        <div class="pixel-panel side-inspector">
-          <div><strong>Bölge:</strong> ${selReg.id}</div>
-          <div><strong>Sahip:</strong> ${selOwner?.name ?? '-'}</div>
-          <div><strong>Biyom:</strong> ${selReg.biome}</div>
-          <div><strong>Kıyı Durumu:</strong> ${selReg.isCoastal ? 'Denize Kıyısı Var (Liman Uygun)' : 'İç Bölge'}</div>
-          <div><strong>Kara Komşuları:</strong> ${selReg.neighbors.length}</div>
-        </div>
-      `
-          : ''
-      }
-    `;
-
-    document.getElementById('btn-back-world')?.addEventListener('click', () => {
-      state.phase = 'world_select';
-      state.arena = null;
-      state.countries = {};
-      state.regions = {};
-      state.selectedRegionId = null;
-      camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, false);
-      renderUI();
-    });
-  }
-
-  uiLayer.innerHTML = `<div class="pixel-panel top-banner">Dünya haritası yükleniyor...</div>`;
   worldCountries = await fetchWorldCountries('/assets/world-50m.json');
   camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, true);
-  renderUI();
+  ui.forceRefresh();
 
-  // Mouse pan / click / zoom interactions
+  // Keyboard: Space = Pause/Resume (Esc intentionally NOT bound per DESIGN.md)
+  window.addEventListener('keydown', (ev) => {
+    if (state.phase !== 'playing') return;
+    const tag = (ev.target as HTMLElement | null)?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (ev.code === 'Space') {
+      ev.preventDefault();
+      togglePauseSpace(state);
+      ui.syncFrame();
+    }
+  });
+
   let isDragging = false;
   let dragMoved = false;
   let lastX = 0;
@@ -123,7 +94,7 @@ async function bootstrap(): Promise<void> {
       if (nextId !== state.hoveredWorldCountryId) {
         state.hoveredWorldCountryId = nextId;
         canvas.style.cursor = nextId ? 'pointer' : 'grab';
-        renderUI();
+        ui.setHoveredWorldCountryName(hit?.name ?? null);
       }
     }
   });
@@ -142,12 +113,14 @@ async function bootstrap(): Promise<void> {
           camera.setBounds(state.arena, canvas.width, canvas.height, false);
         }
         canvas.style.cursor = 'default';
-        renderUI();
+        ui.forceRefresh();
       }
     } else if (state.phase === 'playing') {
       const reg = pickRegionAtPoint(pt, state.regions);
       state.selectedRegionId = reg?.id ?? null;
-      renderUI();
+      if (ui.activeWindow === 'buildings') {
+        ui.renderModal();
+      }
     }
   });
 
@@ -165,9 +138,16 @@ async function bootstrap(): Promise<void> {
 
   let prevMs = performance.now();
   function frame(nowMs: number): void {
-    const dtSec = Math.min(0.1, (nowMs - prevMs) / 1000);
+    const dtRealSec = Math.min(0.1, (nowMs - prevMs) / 1000);
     prevMs = nowMs;
-    camera.update(dtSec);
+    camera.update(dtRealSec);
+
+    const dtSimSec = advanceClock(state, dtRealSec);
+    if (dtSimSec > 0) {
+      tickEconomyAndQueues(state, dtSimSec);
+    }
+
+    ui.syncFrame();
 
     if (state.phase === 'world_select') {
       renderWorldSelectMap(ctx!, worldCountries, state, camera, canvas.width, canvas.height, nowMs);

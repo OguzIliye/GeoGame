@@ -3,8 +3,8 @@
 > Bu dosya [DESIGN.md](DESIGN.md) kapsamındaki tüm fazların durumunu takip eder. Her faz tamamlandığında otomatik test + temiz build + `PROGRESS.md` güncellemesi + `git commit` yapılır.
 
 ## Genel Durum
-- **Aktif Faz:** Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji
-- **Tamamlanan Fazlar:** 1 / 5
+- **Aktif Faz:** Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman
+- **Tamamlanan Fazlar:** 2 / 5
 
 ---
 
@@ -22,16 +22,16 @@
 ---
 
 ## Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji
-- [ ] Oyun içi takvim (`1 Ocak 2000 → 1 Ocak 2020`, `1x` hızda `1 sn = 10 gün`)
-- [ ] Zaman hızı kontrolleri (`Pause / 0x`, `0.5x`, `1x`, `2x`) ve `Space` durdur/devam et kısayolu (`Esc` kullanılmadan)
-- [ ] Başlangıç kaynakları (`300 Para`, `50 Manpower`, `%50 Sağlık`) ve soft-lock önleyici taban akış (`+5 money/s`, `+1 manpower/s`)
-- [ ] Bölge başına maks. 1 bina kuralı ve başlangıç binaları (`1 Banka + 1 Kışla`; `1–4` bölgeli küçük ülkelerde `1 Birleşik Bina` + Tier 2 `Mızrak` & `Bronz Kalkan` açık)
-- [ ] 5 temel bina + 1 kıyı ek binası (**Kışla, Hastane, Banka, Fabrika, Üniversite, Liman**) süre bazlı inşası ve Satın Alma / Binalar UI penceresi
-- [ ] Küçük ülkeler için 3 kademeli **Birleşik Bina** sistemi
-- [ ] **Üniversite (Bilim) UI Penceresi:** 2 ayrı dal (`Kılıç → Mızrak → Pistol → AK → Bazuka` ve `Tahta → Bronz → Çelik → Elmas → Force Field`) süre & para bazlı araştırma
-- [ ] **Fabrika UI Penceresi:** Açık silah ve kalkanlar için süre bazlı üretim emirleri / kuyruğu ve ekipman stoğu
-- [ ] **Kışla UI Penceresi:** Eldeki `Manpower + Silah (+ opsiyonel Kalkan)` ile süre bazlı asker yetiştirme
-- [ ] Faz 2 otomatik birim testleri + temiz build + git commit
+- [x] Oyun içi takvim (`1 Ocak 2000 → 1 Ocak 2020`, `1x` hızda `1 sn = 10 gün`)
+- [x] Zaman hızı kontrolleri (`Pause / 0x`, `0.5x`, `1x`, `2x`) ve `Space` durdur/devam et kısayolu (`Esc` kullanılmadan)
+- [x] Başlangıç kaynakları (`300 Para`, `50 Manpower`, `%50 Sağlık`) ve soft-lock önleyici taban akış (`+5 money/s`, `+1 manpower/s`)
+- [x] Bölge başına maks. 1 bina kuralı ve başlangıç binaları (`1 Banka + 1 Kışla`; `1–4` bölgeli küçük ülkelerde `1 Birleşik Bina` + Tier 2 `Mızrak` & `Bronz Kalkan` açık)
+- [x] 5 temel bina + 1 kıyı ek binası (**Kışla, Hastane, Banka, Fabrika, Üniversite, Liman**) süre bazlı inşası ve Satın Alma / Binalar UI penceresi
+- [x] Küçük ülkeler için 3 kademeli **Birleşik Bina** sistemi
+- [x] **Üniversite (Bilim) UI Penceresi:** 2 ayrı dal (`Kılıç → Mızrak → Pistol → AK → Bazuka` ve `Tahta → Bronz → Çelik → Elmas → Force Field`) süre & para bazlı araştırma
+- [x] **Fabrika UI Penceresi:** Açık silah ve kalkanlar için süre bazlı üretim emirleri / kuyruğu ve ekipman stoğu
+- [x] **Kışla UI Penceresi:** Eldeki `Manpower + Silah (+ opsiyonel Kalkan)` ile süre bazlı asker yetiştirme
+- [x] Faz 2 otomatik birim testleri + temiz build + git commit
 
 ---
 

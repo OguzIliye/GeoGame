@@ -1,5 +1,16 @@
-import type { GameState, MultiPolygonCoords, Region, WorldCountryFeature } from '../types';
+import { BUILDINGS } from '../config/balance';
+import type { BuildingType, GameState, MultiPolygonCoords, Region, WorldCountryFeature } from '../types';
 import { MapCamera } from './camera';
+
+const BUILDING_SHORT: Record<BuildingType, string> = {
+  barracks: 'KŞL',
+  hospital: 'HST',
+  bank: 'BNK',
+  factory: 'FBR',
+  university: 'ÜNİ',
+  port: 'LMN',
+  combined: 'MRK',
+};
 
 function traceMultiPolygon(
   ctx: CanvasRenderingContext2D,
@@ -33,7 +44,6 @@ function drawSeaBackground(
   ctx.fillStyle = '#0f2942';
   ctx.fillRect(0, 0, viewW, viewH);
 
-  // Crisp pixel-art sea wave ticks
   ctx.fillStyle = '#163a5c';
   const stepPx = 44;
   const phase = Math.floor(realTimeMs / 450) % 2;
@@ -69,7 +79,6 @@ export function renderWorldSelectMap(
     const isHovered = c.id === state.hoveredWorldCountryId;
     traceMultiPolygon(ctx, c.polygons, camera, viewW, viewH);
 
-    // Warm pixel-atlas palette on static selection screen
     const shade = 30 + ((i * 37) % 24);
     ctx.fillStyle = isHovered ? '#facc15' : `hsl(142, 26%, ${shade}%)`;
     ctx.fill();
@@ -124,7 +133,6 @@ export function renderRegionalTheater(
   ctx.imageSmoothingEnabled = false;
   drawSeaBackground(ctx, camera, viewW, viewH, realTimeMs);
 
-  // Draw subtle arena boundary frame (outside is unrendered void/sea)
   if (state.arena) {
     const [x1, y1] = camera.mapToScreen(state.arena.minX, state.arena.minY, viewW, viewH);
     const [x2, y2] = camera.mapToScreen(state.arena.maxX, state.arena.maxY, viewW, viewH);
@@ -138,7 +146,7 @@ export function renderRegionalTheater(
 
   const regionList = Object.values(state.regions);
 
-  // 1. Fill only active regions (inactive ~180 world countries are never rendered!)
+  // 1. Fill only active regions
   for (const reg of regionList) {
     const owner = state.countries[reg.ownerId];
     if (!owner) continue;
@@ -147,7 +155,6 @@ export function renderRegionalTheater(
     ctx.fillStyle = mixHexWithBiome(owner.color, reg.biome);
     ctx.fill();
 
-    // Subtle internal province border; brighter if player's own country or selected
     ctx.lineWidth = isSelected ? 2.5 : owner.isPlayer ? 1.3 : 1;
     ctx.strokeStyle = isSelected
       ? '#fde047'
@@ -157,7 +164,53 @@ export function renderRegionalTheater(
     ctx.stroke();
   }
 
-  // 2. Country labels centered on weighted average of owned regions
+  // 2. Render buildings & construction progress bars on regions
+  for (const reg of regionList) {
+    if (!reg.building) continue;
+    const [bx, by] = camera.mapToScreen(reg.centroid[0], reg.centroid[1], viewW, viewH);
+    const b = reg.building;
+    ctx.save();
+    ctx.fillStyle = b.constructing ? 'rgba(30, 41, 59, 0.85)' : 'rgba(15, 23, 42, 0.92)';
+    ctx.fillRect(Math.round(bx - 15), Math.round(by - 9), 30, 14);
+    ctx.strokeStyle = b.constructing ? '#94a3b8' : '#facc15';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(bx - 15), Math.round(by - 9), 30, 14);
+    ctx.fillStyle = b.constructing ? '#cbd5e1' : '#fde047';
+    ctx.font = 'bold 9px "Courier New", monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = BUILDING_SHORT[b.type] ?? BUILDINGS[b.type].name.slice(0, 3);
+    ctx.fillText(label, Math.round(bx), Math.round(by - 2));
+
+    if (b.constructing && b.totalSec > 0) {
+      const pct = Math.min(1, b.progressSec / b.totalSec);
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(Math.round(bx - 15), Math.round(by + 7), 30, 4);
+      ctx.fillStyle = '#38bdf8';
+      ctx.fillRect(Math.round(bx - 15), Math.round(by + 7), Math.round(30 * pct), 4);
+    }
+    ctx.restore();
+  }
+
+  // 3. Render army stack counters
+  for (const army of Object.values(state.armies)) {
+    const owner = state.countries[army.countryId];
+    if (!owner) continue;
+    let count = 0;
+    for (const v of Object.values(army.units)) count += v;
+    if (count <= 0) continue;
+    const [ax, ay] = camera.mapToScreen(army.x, army.y, viewW, viewH);
+    drawPixelTag(
+      ctx,
+      `⚔${count}`,
+      ax,
+      ay - 16,
+      '#ffffff',
+      owner.isPlayer ? '#1d4ed8' : '#b91c1c',
+    );
+  }
+
+  // 4. Country labels
   const labelAcc: Record<string, { x: number; y: number; area: number }> = {};
   for (const reg of regionList) {
     const acc = (labelAcc[reg.ownerId] ??= { x: 0, y: 0, area: 0 });
@@ -175,7 +228,7 @@ export function renderRegionalTheater(
       ctx,
       country.isPlayer ? `★ ${country.name}` : country.name,
       sx,
-      sy,
+      sy + 18,
       country.isPlayer ? '#fef08a' : '#f8fafc',
       'rgba(15, 23, 42, 0.82)',
     );

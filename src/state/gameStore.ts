@@ -1,5 +1,6 @@
 import { ECONOMY } from '../config/balance';
 import { buildRegionalTheater } from '../map/arenaBuilder';
+import { placeInitialCountryBuildings } from '../sim/economy';
 import type { GameState, Point, WorldCountryFeature } from '../types';
 
 export function createInitialGameState(): GameState {
@@ -47,6 +48,7 @@ export function startGameWithCountry(
   state.ships = {};
   state.wounded = [];
   state.diplomacy = {};
+  state.combatTickAccumulator = 0;
   state.simDaysElapsed = 0;
   state.simSecondsElapsed = 0;
   state.speed = 1;
@@ -58,9 +60,10 @@ export function startGameWithCountry(
   state.endReason = null;
   state.toasts = [];
 
-  // Initialize starting money/manpower explicitly from balance config
   for (const c of Object.values(state.countries)) {
     c.money = ECONOMY.START_MONEY;
     c.manpower = ECONOMY.START_MANPOWER;
   }
+
+  placeInitialCountryBuildings(state);
 }
