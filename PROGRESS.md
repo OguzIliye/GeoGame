@@ -3,8 +3,8 @@
 > Bu dosya [DESIGN.md](DESIGN.md) kapsamındaki tüm fazların durumunu takip eder. Her faz tamamlandığında otomatik test + temiz build + `PROGRESS.md` güncellemesi + `git commit` yapılır.
 
 ## Genel Durum
-- **Aktif Faz:** Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman
-- **Tamamlanan Fazlar:** 2 / 5
+- **Aktif Faz:** Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu
+- **Tamamlanan Fazlar:** 3 / 5
 
 ---
 
@@ -36,15 +36,15 @@
 ---
 
 ## Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman
-- [ ] Harita üzerinde görünür ordu kümeleri (stack) ve tıklayınca **Ordu Kümesi Penceresi** (toplam sayı + yalnızca `> 0` olan `(Silah + Kalkan)` türleri ve ayrı sayıları)
-- [ ] Ordu **Birleştirme (Merge)** (yakın dost kümeler) ve **Ayırma (Split)** (mevcut her birlik türü için ayrı sayı girişi zorunluluğu)
-- [ ] Ordu hareket UX: Orduya sol tık → değişen imleç → hedef bölgeye/düşman kümesine sol tık; **sağ tık** veya **harita dışı tık** ile iptal
-- [ ] Askerler yürürken harita üzerinde **animasyonlu ok işareti**
-- [ ] Süre bazlı **Alan Ele Geçirme** (`max(4s, 12s - 1.5*log2(N))`), bölge ele geçirilince ülke sınırının güncellenmesi ve bölgedeki binanın **yıkılması**
-- [ ] Zaman içinde akan **Ordu vs Ordu Savaş** sistemi (Hasar + Koruma + Sayı çoğunluğu çarpanı)
-- [ ] **Savaştan Kaçış & Hastane Döngüsü:** Düşen askerlerin `%30`'unun (ayakta Hastane/Birleşik Bina varsa) otomatik en yakın hastaneye yürümesi ve `8 sn`'de iyileşip **eski birlik/ekipman türüyle** geri dönmesi (hastane yoksa kurtarılamaz)
-- [ ] **Liman & Deniz Taşımacılığı:** Gemi savaşı yok; sınırsız kapasiteli taşıma gemisinin denizde görünür ve süre bazlı seyri, kıyıya varınca askerlerin karada belirmesi, geri binmek için **önce askere sonra gemiye tıklama**
-- [ ] Faz 3 otomatik birim testleri + temiz build + git commit
+- [x] Harita üzerinde görünür ordu kümeleri (stack) ve tıklayınca **Ordu Kümesi Penceresi** (toplam sayı + yalnızca `> 0` olan `(Silah + Kalkan)` türleri ve ayrı sayıları)
+- [x] Ordu **Birleştirme (Merge)** (yakın dost kümeler) ve **Ayırma (Split)** (mevcut her birlik türü için ayrı sayı girişi zorunluluğu)
+- [x] Ordu hareket UX: Orduya sol tık → değişen imleç → hedef bölgeye/düşman kümesine sol tık; **sağ tık** veya **harita dışı tık** ile iptal
+- [x] Askerler yürürken harita üzerinde **animasyonlu ok işareti**
+- [x] Süre bazlı **Alan Ele Geçirme** (`max(4s, 12s - 1.5*log2(N))`), bölge ele geçirilince ülke sınırının güncellenmesi ve bölgedeki binanın **yıkılması**
+- [x] Zaman içinde akan **Ordu vs Ordu Savaş** sistemi (Hasar + Koruma + Sayı çoğunluğu çarpanı)
+- [x] **Savaştan Kaçış & Hastane Döngüsü:** Düşen askerlerin `%30`'unun (ayakta Hastane/Birleşik Bina varsa) otomatik en yakın hastaneye yürümesi ve `8 sn`'de iyileşip **eski birlik/ekipman türüyle** geri dönmesi (hastane yoksa kurtarılamaz)
+- [x] **Liman & Deniz Taşımacılığı:** Gemi savaşı yok; sınırsız kapasiteli taşıma gemisinin denizde görünür ve süre bazlı seyri, kıyıya varınca askerlerin karada belirmesi, geri binmek için **önce askere sonra gemiye tıklama**
+- [x] Faz 3 otomatik birim testleri + temiz build + git commit
 
 ---
 

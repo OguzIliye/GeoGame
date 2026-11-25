@@ -2,8 +2,18 @@ import { pickRegionAtPoint } from './map/arenaBuilder';
 import { fetchWorldCountries, pickWorldCountryAtPoint } from './map/worldLoader';
 import { MapCamera } from './render/camera';
 import { renderRegionalTheater, renderWorldSelectMap } from './render/mapRenderer';
+import {
+  cancelSelectionAndOrderMode,
+  orderArmyAttackEnemyArmy,
+  orderArmyEmbarkShip,
+  orderArmyMoveToRegion,
+  orderShipSailToCoastalRegion,
+  pickArmyAtPoint,
+  pickShipAtPoint,
+  tickArmiesCombatAndShips,
+} from './sim/army';
 import { advanceClock, togglePauseSpace } from './sim/calendar';
-import { tickEconomyAndQueues } from './sim/economy';
+import { pushImportantToast, tickEconomyAndQueues } from './sim/economy';
 import { createInitialGameState, startGameWithCountry } from './state/gameStore';
 import type { WorldCountryFeature } from './types';
 import { GameUIController } from './ui/windows';
@@ -27,10 +37,22 @@ async function bootstrap(): Promise<void> {
     state.regions = {};
     state.armies = {};
     state.ships = {};
+    state.wounded = [];
+    cancelSelectionAndOrderMode(state);
     state.selectedRegionId = null;
     camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, false);
     ui.forceRefresh();
   });
+
+  function syncCursor(): void {
+    if (state.phase === 'world_select') {
+      canvas.style.cursor = state.hoveredWorldCountryId ? 'pointer' : 'grab';
+    } else if (state.moveOrderMode) {
+      canvas.style.cursor = 'crosshair';
+    } else {
+      canvas.style.cursor = 'default';
+    }
+  }
 
   function resize(): void {
     canvas.width = window.innerWidth;
@@ -60,12 +82,30 @@ async function bootstrap(): Promise<void> {
     }
   });
 
+  // Clicking on any UI element outside the map cancels army move order mode per DESIGN.md
+  uiLayer.addEventListener('mousedown', () => {
+    if (state.moveOrderMode) {
+      state.moveOrderMode = false;
+      syncCursor();
+    }
+  });
+
   let isDragging = false;
   let dragMoved = false;
   let lastX = 0;
   let lastY = 0;
 
   canvas.addEventListener('mousedown', (ev) => {
+    // Right-click cancels army/ship move order mode per DESIGN.md
+    if (ev.button === 2) {
+      ev.preventDefault();
+      cancelSelectionAndOrderMode(state);
+      if (ui.activeWindow === 'army') ui.openWindow(null, false);
+      syncCursor();
+      ui.syncFrame();
+      return;
+    }
+
     if (ev.button === 0) {
       isDragging = true;
       dragMoved = false;
@@ -93,7 +133,7 @@ async function bootstrap(): Promise<void> {
       const nextId = hit?.id ?? null;
       if (nextId !== state.hoveredWorldCountryId) {
         state.hoveredWorldCountryId = nextId;
-        canvas.style.cursor = nextId ? 'pointer' : 'grab';
+        syncCursor();
         ui.setHoveredWorldCountryName(hit?.name ?? null);
       }
     }
@@ -112,16 +152,131 @@ async function bootstrap(): Promise<void> {
         if (state.arena) {
           camera.setBounds(state.arena, canvas.width, canvas.height, false);
         }
-        canvas.style.cursor = 'default';
+        syncCursor();
         ui.forceRefresh();
       }
-    } else if (state.phase === 'playing') {
-      const reg = pickRegionAtPoint(pt, state.regions);
-      state.selectedRegionId = reg?.id ?? null;
-      if (ui.activeWindow === 'buildings') {
-        ui.renderModal();
+      return;
+    }
+
+    if (state.phase !== 'playing') return;
+
+    // Outside active arena frame -> cancel move order mode per DESIGN.md
+    if (
+      state.arena &&
+      (pt[0] < state.arena.minX ||
+        pt[0] > state.arena.maxX ||
+        pt[1] < state.arena.minY ||
+        pt[1] > state.arena.maxY)
+    ) {
+      cancelSelectionAndOrderMode(state);
+      syncCursor();
+      ui.syncFrame();
+      return;
+    }
+
+    const hitRadius = Math.max(0.35, 16 / camera.scale);
+    const clickedArmy = pickArmyAtPoint(state, pt, hitRadius);
+    const clickedShip = pickShipAtPoint(state, pt, hitRadius);
+    const clickedReg = pickRegionAtPoint(pt, state.regions);
+
+    // A. Move Order Mode active (army or ship selected and awaiting destination)
+    if (state.moveOrderMode) {
+      if (state.selectedArmyId && state.armies[state.selectedArmyId]) {
+        const myArmy = state.armies[state.selectedArmyId];
+
+        // 1. Click friendly ship -> Embark / Re-embark ("önce askere sonra gemiye tıklamalıyız")
+        if (clickedShip && clickedShip.countryId === state.playerCountryId) {
+          const res = orderArmyEmbarkShip(state, myArmy.id, clickedShip.id);
+          if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
+          state.moveOrderMode = false;
+          syncCursor();
+          return;
+        }
+
+        // 2. Click enemy army -> Attack
+        if (clickedArmy && clickedArmy.countryId !== state.playerCountryId) {
+          const res = orderArmyAttackEnemyArmy(state, myArmy.id, clickedArmy.id);
+          if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
+          state.moveOrderMode = false;
+          syncCursor();
+          return;
+        }
+
+        // 3. Click another friendly army -> switch selection to it
+        if (clickedArmy && clickedArmy.countryId === state.playerCountryId && clickedArmy.id !== myArmy.id) {
+          state.selectedArmyId = clickedArmy.id;
+          ui.openWindow('army', false);
+          syncCursor();
+          return;
+        }
+
+        // 4. Click target region -> Move / Capture
+        if (clickedReg) {
+          const res = orderArmyMoveToRegion(state, myArmy.id, clickedReg.id, pt);
+          if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
+          state.moveOrderMode = false;
+          if (ui.activeWindow === 'army') ui.openWindow(null, false);
+          syncCursor();
+          return;
+        }
+
+        // Clicked open sea / non-target -> cancel
+        cancelSelectionAndOrderMode(state);
+        if (ui.activeWindow === 'army') ui.openWindow(null, false);
+        syncCursor();
+        return;
+      }
+
+      if (state.selectedShipId && state.ships[state.selectedShipId]) {
+        if (clickedReg) {
+          const res = orderShipSailToCoastalRegion(state, state.selectedShipId, clickedReg.id);
+          if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
+          state.moveOrderMode = false;
+          syncCursor();
+          return;
+        }
+        cancelSelectionAndOrderMode(state);
+        syncCursor();
+        return;
       }
     }
+
+    // B. Normal Selection Mode
+    if (clickedArmy) {
+      state.selectedArmyId = clickedArmy.id;
+      state.selectedShipId = null;
+      state.moveOrderMode =
+        clickedArmy.countryId === state.playerCountryId && !clickedArmy.inCombatWithArmyId;
+      ui.openWindow('army', false);
+      syncCursor();
+      return;
+    }
+
+    if (clickedShip && clickedShip.countryId === state.playerCountryId) {
+      state.selectedShipId = clickedShip.id;
+      state.selectedArmyId = null;
+      state.moveOrderMode = true;
+      syncCursor();
+      return;
+    }
+
+    if (clickedReg) {
+      cancelSelectionAndOrderMode(state);
+      state.selectedRegionId = clickedReg.id;
+      if (ui.activeWindow === 'buildings') {
+        ui.renderModal();
+      } else if (ui.activeWindow === 'army') {
+        ui.openWindow(null, false);
+      }
+      syncCursor();
+      return;
+    }
+
+    // Clicked outside land/units -> cancel selection
+    cancelSelectionAndOrderMode(state);
+    state.selectedRegionId = null;
+    if (ui.activeWindow === 'army') ui.openWindow(null, false);
+    syncCursor();
   });
 
   canvas.addEventListener(
@@ -145,6 +300,7 @@ async function bootstrap(): Promise<void> {
     const dtSimSec = advanceClock(state, dtRealSec);
     if (dtSimSec > 0) {
       tickEconomyAndQueues(state, dtSimSec);
+      tickArmiesCombatAndShips(state, dtSimSec);
     }
 
     ui.syncFrame();

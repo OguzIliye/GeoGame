@@ -1,4 +1,5 @@
 import { BUILDINGS } from '../config/balance';
+import { getTotalSoldiers } from '../sim/army';
 import type { BuildingType, GameState, MultiPolygonCoords, Region, WorldCountryFeature } from '../types';
 import { MapCamera } from './camera';
 
@@ -122,6 +123,55 @@ function mixHexWithBiome(hex: string, biome: Region['biome']): string {
   return `rgb(${mr}, ${mg}, ${mb})`;
 }
 
+/** Draw an animated pixel-style movement arrow between two screen points. */
+export function drawAnimatedMovementArrow(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  color: string,
+  realTimeMs: number,
+): void {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 6) return;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([8, 6]);
+  ctx.lineDashOffset = -((realTimeMs * 0.04) % 14);
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.stroke();
+
+  // Solid arrowhead at destination + pulsing chevron marching along the line
+  ctx.setLineDash([]);
+  const angle = Math.atan2(dy, dx);
+  const headLen = 10;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - headLen * Math.cos(angle - 0.5), y2 - headLen * Math.sin(angle - 0.5));
+  ctx.lineTo(x2 - headLen * Math.cos(angle + 0.5), y2 - headLen * Math.sin(angle + 0.5));
+  ctx.closePath();
+  ctx.fill();
+
+  const t = (realTimeMs % 1100) / 1100;
+  const mx = x1 + dx * t;
+  const my = y1 + dy * t;
+  ctx.beginPath();
+  ctx.moveTo(mx + 6 * Math.cos(angle), my + 6 * Math.sin(angle));
+  ctx.lineTo(mx - 5 * Math.cos(angle - 0.6), my - 5 * Math.sin(angle - 0.6));
+  ctx.lineTo(mx - 5 * Math.cos(angle + 0.6), my - 5 * Math.sin(angle + 0.6));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 export function renderRegionalTheater(
   ctx: CanvasRenderingContext2D,
   state: GameState,
@@ -146,7 +196,7 @@ export function renderRegionalTheater(
 
   const regionList = Object.values(state.regions);
 
-  // 1. Fill only active regions
+  // 1. Fill only active regions (inactive ~180 world countries are never rendered)
   for (const reg of regionList) {
     const owner = state.countries[reg.ownerId];
     if (!owner) continue;
@@ -164,53 +214,153 @@ export function renderRegionalTheater(
     ctx.stroke();
   }
 
-  // 2. Render buildings & construction progress bars on regions
+  // 2. Render buildings & capture progress bars on regions
   for (const reg of regionList) {
-    if (!reg.building) continue;
     const [bx, by] = camera.mapToScreen(reg.centroid[0], reg.centroid[1], viewW, viewH);
-    const b = reg.building;
-    ctx.save();
-    ctx.fillStyle = b.constructing ? 'rgba(30, 41, 59, 0.85)' : 'rgba(15, 23, 42, 0.92)';
-    ctx.fillRect(Math.round(bx - 15), Math.round(by - 9), 30, 14);
-    ctx.strokeStyle = b.constructing ? '#94a3b8' : '#facc15';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(Math.round(bx - 15), Math.round(by - 9), 30, 14);
-    ctx.fillStyle = b.constructing ? '#cbd5e1' : '#fde047';
-    ctx.font = 'bold 9px "Courier New", monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const label = BUILDING_SHORT[b.type] ?? BUILDINGS[b.type].name.slice(0, 3);
-    ctx.fillText(label, Math.round(bx), Math.round(by - 2));
 
-    if (b.constructing && b.totalSec > 0) {
-      const pct = Math.min(1, b.progressSec / b.totalSec);
+    if (reg.building) {
+      const b = reg.building;
+      ctx.save();
+      ctx.fillStyle = b.constructing ? 'rgba(30, 41, 59, 0.85)' : 'rgba(15, 23, 42, 0.92)';
+      ctx.fillRect(Math.round(bx - 15), Math.round(by - 9), 30, 14);
+      ctx.strokeStyle = b.constructing ? '#94a3b8' : '#facc15';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(Math.round(bx - 15), Math.round(by - 9), 30, 14);
+      ctx.fillStyle = b.constructing ? '#cbd5e1' : '#fde047';
+      ctx.font = 'bold 9px "Courier New", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const label = BUILDING_SHORT[b.type] ?? BUILDINGS[b.type].name.slice(0, 3);
+      ctx.fillText(label, Math.round(bx), Math.round(by - 2));
+
+      if (b.constructing && b.totalSec > 0) {
+        const pct = Math.min(1, b.progressSec / b.totalSec);
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(Math.round(bx - 15), Math.round(by + 7), 30, 4);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(Math.round(bx - 15), Math.round(by + 7), Math.round(30 * pct), 4);
+      }
+      ctx.restore();
+    }
+
+    if (reg.capture) {
+      const pct = Math.min(1, reg.capture.elapsedSec / Math.max(0.1, reg.capture.requiredSec));
+      const atkColor = state.countries[reg.capture.attackerCountryId]?.color ?? '#ef4444';
+      ctx.save();
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(Math.round(bx - 15), Math.round(by + 7), 30, 4);
-      ctx.fillStyle = '#38bdf8';
-      ctx.fillRect(Math.round(bx - 15), Math.round(by + 7), Math.round(30 * pct), 4);
+      ctx.fillRect(Math.round(bx - 20), Math.round(by + 12), 40, 6);
+      ctx.fillStyle = atkColor;
+      ctx.fillRect(Math.round(bx - 19), Math.round(by + 13), Math.round(38 * pct), 4);
+      ctx.strokeStyle = '#f8fafc';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(Math.round(bx - 20), Math.round(by + 12), 40, 6);
+      ctx.restore();
+    }
+  }
+
+  // 3. Animated movement arrows for armies & sailing ships
+  for (const army of Object.values(state.armies)) {
+    if (army.targetX !== null && army.targetY !== null) {
+      const [x1, y1] = camera.mapToScreen(army.x, army.y, viewW, viewH);
+      const [x2, y2] = camera.mapToScreen(army.targetX, army.targetY, viewW, viewH);
+      const isPlayer = army.countryId === state.playerCountryId;
+      drawAnimatedMovementArrow(
+        ctx,
+        x1,
+        y1,
+        x2,
+        y2,
+        isPlayer ? '#fde047' : '#fca5a5',
+        realTimeMs,
+      );
+    }
+  }
+
+  for (const ship of Object.values(state.ships)) {
+    if (ship.targetX !== null && ship.targetY !== null) {
+      const [x1, y1] = camera.mapToScreen(ship.x, ship.y, viewW, viewH);
+      const [x2, y2] = camera.mapToScreen(ship.targetX, ship.targetY, viewW, viewH);
+      drawAnimatedMovementArrow(ctx, x1, y1, x2, y2, '#38bdf8', realTimeMs);
+    }
+  }
+
+  // 4. Render Transport Ships on sea
+  for (const ship of Object.values(state.ships)) {
+    const owner = state.countries[ship.countryId];
+    if (!owner) continue;
+    const [sx, sy] = camera.mapToScreen(ship.x, ship.y, viewW, viewH);
+    const carried = getTotalSoldiers(ship.units);
+    const isSel = ship.id === state.selectedShipId;
+
+    ctx.save();
+    // Pixel boat hull
+    ctx.fillStyle = isSel ? '#fde047' : '#92400e';
+    ctx.fillRect(Math.round(sx - 10), Math.round(sy - 2), 20, 6);
+    // Sail
+    ctx.fillStyle = owner.color;
+    ctx.fillRect(Math.round(sx - 5), Math.round(sy - 11), 10, 9);
+    ctx.strokeStyle = '#f8fafc';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(Math.round(sx - 5), Math.round(sy - 11), 10, 9);
+    if (carried > 0) {
+      drawPixelTag(ctx, `⚓${carried}`, sx, sy - 20, '#fef08a', '#0f172a');
     }
     ctx.restore();
   }
 
-  // 3. Render army stack counters
+  // 5. Render Wounded soldiers retreating to Hospital & healing progress
+  for (const w of state.wounded) {
+    const wx = w.from[0] + (w.to[0] - w.from[0]) * w.travelProgress;
+    const wy = w.from[1] + (w.to[1] - w.from[1]) * w.travelProgress;
+    const [sx, sy] = camera.mapToScreen(wx, wy, viewW, viewH);
+    ctx.save();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(Math.round(sx - 5), Math.round(sy - 5), 10, 10);
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(Math.round(sx - 1), Math.round(sy - 4), 2, 8);
+    ctx.fillRect(Math.round(sx - 4), Math.round(sy - 1), 8, 2);
+    ctx.restore();
+  }
+
+  // 6. Render Army Stacks & Combat flashes
   for (const army of Object.values(state.armies)) {
     const owner = state.countries[army.countryId];
     if (!owner) continue;
-    let count = 0;
-    for (const v of Object.values(army.units)) count += v;
+    const count = getTotalSoldiers(army.units);
     if (count <= 0) continue;
     const [ax, ay] = camera.mapToScreen(army.x, army.y, viewW, viewH);
+    const isSel = army.id === state.selectedArmyId;
+
+    if (isSel) {
+      ctx.save();
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.round(ax - 22), Math.round(ay - 28), 44, 24);
+      ctx.restore();
+    }
+
+    if (army.inCombatWithArmyId) {
+      const pulse = Math.floor(realTimeMs / 180) % 2 === 0;
+      ctx.save();
+      ctx.strokeStyle = pulse ? '#ef4444' : '#facc15';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(ax, ay - 14, 18, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     drawPixelTag(
       ctx,
-      `⚔${count}`,
+      `${army.inCombatWithArmyId ? '💥' : '⚔'}${count}`,
       ax,
       ay - 16,
       '#ffffff',
-      owner.isPlayer ? '#1d4ed8' : '#b91c1c',
+      owner.isPlayer ? '#1d4ed8' : owner.color,
     );
   }
 
-  // 4. Country labels
+  // 7. Country labels
   const labelAcc: Record<string, { x: number; y: number; area: number }> = {};
   for (const reg of regionList) {
     const acc = (labelAcc[reg.ownerId] ??= { x: 0, y: 0, area: 0 });
@@ -228,7 +378,7 @@ export function renderRegionalTheater(
       ctx,
       country.isPlayer ? `★ ${country.name}` : country.name,
       sx,
-      sy + 18,
+      sy + 20,
       country.isPlayer ? '#fef08a' : '#f8fafc',
       'rgba(15, 23, 42, 0.82)',
     );

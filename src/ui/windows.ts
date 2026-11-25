@@ -6,7 +6,16 @@ import {
   WEAPON_ORDER,
   WEAPONS,
 } from '../config/balance';
+import {
+  formatUnitKeyLabel,
+  getMergeableFriendlyArmies,
+  getNonZeroUnits,
+  getTotalSoldiers,
+  mergeArmies,
+  splitArmyStack,
+} from '../sim/army';
 import { formatSimDate, setGameSpeed } from '../sim/calendar';
+import { declareWar, getDiplomacyEdge, proposeAlliance, proposePeace } from '../sim/diplomacy';
 import {
   getCountryHealthPct,
   getCountryManpowerPerSec,
@@ -33,6 +42,7 @@ export type ActiveWindowId =
 
 export class GameUIController {
   activeWindow: ActiveWindowId = null;
+  selectedDiplomacyCountryId: string | null = null;
   lastErrorMsg = '';
   private root: HTMLDivElement;
   private state: GameState;
@@ -45,8 +55,8 @@ export class GameUIController {
     this.onReturnToWorld = onReturnToWorld;
   }
 
-  openWindow(win: ActiveWindowId): void {
-    this.activeWindow = this.activeWindow === win ? null : win;
+  openWindow(win: ActiveWindowId, toggle = true): void {
+    this.activeWindow = toggle && this.activeWindow === win ? null : win;
     this.lastErrorMsg = '';
     this.renderModal();
     this.syncDockButtons();
@@ -70,15 +80,6 @@ export class GameUIController {
             <span id="world-hover-badge" class="badge" style="display:none"></span>
           </div>
         `;
-      }
-      const badge = document.getElementById('world-hover-badge');
-      if (badge) {
-        if (this.state.hoveredWorldCountryId) {
-          badge.style.display = 'inline-block';
-          badge.textContent = badge.dataset.label || '';
-        } else {
-          badge.style.display = 'none';
-        }
       }
       return;
     }
@@ -110,6 +111,9 @@ export class GameUIController {
         <div class="hud-group">
           <strong id="hud-country">★ Ülke</strong>
           <span id="hud-date" class="badge">1 Oca 2000</span>
+          <span id="hud-order-hint" class="badge" style="display:none;background:#854d0e;border-color:#facc15">
+            🎯 Hedefe Sol Tıkla (Sağ Tık: İptal)
+          </span>
         </div>
         <div class="hud-group">
           <span title="Para ve saniyelik gelir">💰 <b id="hud-money">300</b> (<span id="hud-money-rate">+5</span>/s)</span>
@@ -132,6 +136,7 @@ export class GameUIController {
         <button class="pixel-btn dock-btn" data-win="factory">⚙️ Fabrika</button>
         <button class="pixel-btn dock-btn" data-win="barracks">🛡️ Kışla</button>
         <button class="pixel-btn dock-btn" data-win="science">🔬 Bilim</button>
+        <button class="pixel-btn dock-btn" data-win="diplomacy">📜 Diplomasi</button>
         <button class="pixel-btn" id="btn-world-reset">🌍 Harita</button>
       </div>
 
@@ -183,10 +188,19 @@ export class GameUIController {
     setTxt('hud-mp-rate', `+${getCountryManpowerPerSec(this.state, pid)}`);
     setTxt('hud-health', `%${getCountryHealthPct(this.state, pid)}`);
 
+    const hintEl = document.getElementById('hud-order-hint');
+    if (hintEl) {
+      hintEl.style.display = this.state.moveOrderMode ? 'inline-block' : 'none';
+    }
+
     let totalSoldiers = 0;
     for (const a of Object.values(this.state.armies)) {
       if (a.countryId !== pid) continue;
-      for (const cnt of Object.values(a.units)) totalSoldiers += cnt;
+      totalSoldiers += getTotalSoldiers(a.units);
+    }
+    for (const s of Object.values(this.state.ships)) {
+      if (s.countryId !== pid) continue;
+      totalSoldiers += getTotalSoldiers(s.units);
     }
     setTxt('hud-soldiers', `${totalSoldiers}`);
 
@@ -194,23 +208,33 @@ export class GameUIController {
       btn.classList.toggle('active-btn', Number(btn.dataset.speed) === this.state.speed);
     });
 
-    // Selected region inspector
     const regEl = document.getElementById('region-bar');
     if (regEl) {
-      const reg = this.state.selectedRegionId ? this.state.regions[this.state.selectedRegionId] : null;
-      if (!reg) {
-        regEl.style.display = 'none';
-      } else {
+      if (this.state.selectedShipId && this.state.ships[this.state.selectedShipId]) {
+        const sh = this.state.ships[this.state.selectedShipId];
+        const carried = getTotalSoldiers(sh.units);
         regEl.style.display = 'block';
-        const owner = this.state.countries[reg.ownerId];
-        const bText = reg.building
-          ? `${BUILDINGS[reg.building.type].name}${reg.building.type === 'combined' ? ` Lv.${reg.building.level}` : ''}${reg.building.constructing ? ` (%${Math.floor((reg.building.progressSec / Math.max(0.1, reg.building.totalSec)) * 100)})` : ''}`
-          : 'Yok (Boş)';
         regEl.innerHTML = `
-          <div><strong>Bölge:</strong> ${reg.id} (${owner?.name ?? '-'})</div>
-          <div><strong>Bina:</strong> ${bText}</div>
-          <div><strong>Durum:</strong> ${reg.biome} | ${reg.isCoastal ? '🌊 Kıyı' : '🏔️ Kara'}</div>
+          <div><strong>⚓ Taşıma Gemisi</strong> (${this.state.countries[sh.countryId]?.name ?? '-'})</div>
+          <div><strong>Taşınan Asker:</strong> ${carried} (Kapasite: Sınırsız)</div>
+          <div class="muted">Kıyı bölgesine sol tıklayarak gönderin. Asker bindirmek için önce askere sonra gemiye tıklayın.</div>
         `;
+      } else {
+        const reg = this.state.selectedRegionId ? this.state.regions[this.state.selectedRegionId] : null;
+        if (!reg) {
+          regEl.style.display = 'none';
+        } else {
+          regEl.style.display = 'block';
+          const owner = this.state.countries[reg.ownerId];
+          const bText = reg.building
+            ? `${BUILDINGS[reg.building.type].name}${reg.building.type === 'combined' ? ` Lv.${reg.building.level}` : ''}${reg.building.constructing ? ` (%${Math.floor((reg.building.progressSec / Math.max(0.1, reg.building.totalSec)) * 100)})` : ''}`
+            : 'Yok (Boş)';
+          regEl.innerHTML = `
+            <div><strong>Bölge:</strong> ${reg.id} (${owner?.name ?? '-'})</div>
+            <div><strong>Bina:</strong> ${bText}</div>
+            <div><strong>Durum:</strong> ${reg.biome} | ${reg.isCoastal ? '🌊 Kıyı' : '🏔️ Kara'}</div>
+          `;
+        }
       }
     }
   }
@@ -251,9 +275,11 @@ export class GameUIController {
       }
     } else if (this.activeWindow === 'factory') {
       const q = p.productionQueue[0];
+      const wSummary = WEAPON_ORDER.map((w) => `${WEAPONS[w].name}:${p.weaponsStock[w]}`).join(' ');
+      const sSummary = SHIELD_ORDER.map((s) => `${SHIELDS[s].name}:${p.shieldsStock[s]}`).join(' ');
       liveBox.textContent = q
-        ? `Üretiliyor: ${q.itemId} (Kalan: ${q.remainingCount} adet, Kuyruk: ${p.productionQueue.length}) | Stok Silah: ${JSON.stringify(p.weaponsStock)} | Kalkan: ${JSON.stringify(p.shieldsStock)}`
-        : `Fabrika boşta. Stok Silah: Kılıç ${p.weaponsStock.sword}, Mızrak ${p.weaponsStock.spear}, Pistol ${p.weaponsStock.pistol}, AK ${p.weaponsStock.ak}, Bazuka ${p.weaponsStock.bazooka} | Kalkan: Tahta ${p.shieldsStock.wood}, Bronz ${p.shieldsStock.bronze}, Çelik ${p.shieldsStock.steel}, Elmas ${p.shieldsStock.diamond}, FF ${p.shieldsStock.forcefield}`;
+        ? `Üretiliyor: ${q.itemId} (Kalan: ${q.remainingCount}) | Silah: [${wSummary}] | Kalkan: [${sSummary}]`
+        : `Fabrika boşta | Silah: [${wSummary}] | Kalkan: [${sSummary}]`;
     } else if (this.activeWindow === 'barracks') {
       const q = p.trainingQueue[0];
       liveBox.textContent = q
@@ -272,6 +298,195 @@ export class GameUIController {
     }
     const p = this.state.countries[pid];
     const errHtml = this.lastErrorMsg ? `<div class="err-line">${this.lastErrorMsg}</div>` : '';
+
+    if (this.activeWindow === 'army') {
+      const army = this.state.selectedArmyId ? this.state.armies[this.state.selectedArmyId] : null;
+      if (!army) {
+        this.activeWindow = null;
+        host.innerHTML = '';
+        return;
+      }
+      const owner = this.state.countries[army.countryId];
+      const entries = getNonZeroUnits(army.units);
+      const total = getTotalSoldiers(army.units);
+      const isMine = army.countryId === pid;
+      const mergeable = isMine ? getMergeableFriendlyArmies(this.state, army.id) : [];
+
+      host.innerHTML = `
+        <div class="pixel-panel modal-window">
+          <div class="modal-header">
+            <strong>⚔️ Ordu Kümesi — ${owner?.name ?? ''} (Toplam: ${total} Asker)</strong>
+            <button class="pixel-btn close-win">✕</button>
+          </div>
+          ${errHtml}
+          <div class="muted" style="margin-bottom:8px">
+            ${isMine ? 'Haritada hedef bölgeye, düşman ordusuna veya dost gemiye sol tıklayarak gönderebilirsiniz (Sağ tık = İptal).' : 'Yabancı ordu kümesi.'}
+          </div>
+          <div class="card-list">
+            ${entries
+              .map(
+                ([key, cnt]) => `
+                <div class="card-row">
+                  <span><b>${formatUnitKeyLabel(key)}</b></span>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <span class="badge">${cnt} asker</span>
+                    ${
+                      isMine && total > 1
+                        ? `<label>Ayır: <input class="pixel-input split-input" data-unit="${key}" type="number" min="0" max="${cnt}" value="0" style="width:68px" /></label>`
+                        : ''
+                    }
+                  </div>
+                </div>
+              `,
+              )
+              .join('')}
+          </div>
+          ${
+            isMine
+              ? `
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              ${
+                total > 1
+                  ? `<button class="pixel-btn" id="btn-split-army">✂️ Belirtilen Sayılarla Ayır</button>`
+                  : ''
+              }
+              ${mergeable
+                .map(
+                  (m) =>
+                    `<button class="pixel-btn btn-merge-army" data-other="${m.id}">🔗 Yakın Kümeyle Birleştir (${getTotalSoldiers(m.units)} asker)</button>`,
+                )
+                .join('')}
+            </div>
+          `
+              : ''
+          }
+        </div>
+      `;
+
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
+      host.querySelector('#btn-split-army')?.addEventListener('click', () => {
+        const splitMap: Record<string, number> = {};
+        host.querySelectorAll<HTMLInputElement>('.split-input').forEach((inp) => {
+          const uKey = inp.dataset.unit!;
+          splitMap[uKey] = Number(inp.value);
+        });
+        const res = splitArmyStack(this.state, army.id, splitMap);
+        this.lastErrorMsg = res.ok ? '' : res.error || '';
+        this.renderModal();
+      });
+      host.querySelectorAll<HTMLButtonElement>('.btn-merge-army').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const otherId = btn.dataset.other!;
+          const res = mergeArmies(this.state, army.id, otherId);
+          this.lastErrorMsg = res.ok ? '' : res.error || '';
+          this.renderModal();
+        });
+      });
+      return;
+    }
+
+    if (this.activeWindow === 'diplomacy') {
+      const others = Object.values(this.state.countries).filter((c) => c.id !== pid && !c.eliminated);
+      if (!this.selectedDiplomacyCountryId || !this.state.countries[this.selectedDiplomacyCountryId] || this.state.countries[this.selectedDiplomacyCountryId].eliminated) {
+        this.selectedDiplomacyCountryId = others[0]?.id ?? null;
+      }
+      const target = this.selectedDiplomacyCountryId
+        ? this.state.countries[this.selectedDiplomacyCountryId]
+        : null;
+      const edge = target ? getDiplomacyEdge(this.state, pid, target.id) : null;
+      const statusLabels = {
+        neutral: '⚪ Nötr',
+        allied: '🟢 İttifak',
+        war: '🔴 Savaşta',
+      };
+
+      host.innerHTML = `
+        <div class="pixel-panel modal-window">
+          <div class="modal-header">
+            <strong>📜 Diplomasi — Aktif Ülkeler (${others.length})</strong>
+            <button class="pixel-btn close-win">✕</button>
+          </div>
+          ${errHtml}
+          <div class="two-col">
+            <div class="branch-col">
+              <h4>Ülkeler</h4>
+              ${others
+                .map((c) => {
+                  const rel = getDiplomacyEdge(this.state, pid, c.id)?.status ?? 'neutral';
+                  const regCnt = getCountryRegions(this.state, c.id).length;
+                  return `
+                    <button class="pixel-btn ${c.id === target?.id ? 'active-btn' : ''}" data-dip-id="${c.id}" style="text-align:left;display:flex;justify-content:space-between">
+                      <span>${c.name} (${regCnt})</span>
+                      <span>${statusLabels[rel]}</span>
+                    </button>
+                  `;
+                })
+                .join('')}
+            </div>
+            <div class="branch-col">
+              ${
+                target && edge
+                  ? `
+                <h4>${target.name} Sayfası</h4>
+                <div class="card-row"><span>İlişki Durumu:</span> <b>${statusLabels[edge.status]} (${edge.score})</b></div>
+                <div class="card-row"><span>Bölge Sayısı:</span> <b>${getCountryRegions(this.state, target.id).length}</b></div>
+                <div class="card-row"><span>Profil:</span> <b>${target.personality}</b></div>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+                  ${
+                    edge.status !== 'war'
+                      ? `<button class="pixel-btn" id="btn-dip-war">⚔️ Savaş İlan Et</button>`
+                      : `<button class="pixel-btn" id="btn-dip-peace">🕊️ Barış Teklif Et</button>`
+                  }
+                  ${
+                    edge.status === 'neutral'
+                      ? `<button class="pixel-btn" id="btn-dip-ally">🤝 İttifak Teklif Et</button>`
+                      : ''
+                  }
+                </div>
+              `
+                  : '<div class="muted">Aktif ülke kalmadı.</div>'
+              }
+            </div>
+          </div>
+        </div>
+      `;
+
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
+      host.querySelectorAll<HTMLButtonElement>('[data-dip-id]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.selectedDiplomacyCountryId = btn.dataset.dipId || null;
+          this.lastErrorMsg = '';
+          this.renderModal();
+        });
+      });
+      host.querySelector('#btn-dip-war')?.addEventListener('click', () => {
+        if (!target) return;
+        const res = declareWar(this.state, pid, target.id);
+        this.lastErrorMsg = res.ok ? '' : res.error || '';
+        this.renderModal();
+      });
+      host.querySelector('#btn-dip-ally')?.addEventListener('click', () => {
+        if (!target) return;
+        const res = proposeAlliance(this.state, pid, target.id);
+        this.lastErrorMsg = !res.ok
+          ? res.error || ''
+          : res.accepted
+            ? ''
+            : `${target.name} ittifak teklifini reddetti.`;
+        this.renderModal();
+      });
+      host.querySelector('#btn-dip-peace')?.addEventListener('click', () => {
+        if (!target) return;
+        const res = proposePeace(this.state, pid, target.id);
+        this.lastErrorMsg = !res.ok
+          ? res.error || ''
+          : res.accepted
+            ? ''
+            : `${target.name} barış teklifini reddetti.`;
+        this.renderModal();
+      });
+      return;
+    }
 
     if (this.activeWindow === 'buildings') {
       const owned = getCountryRegions(this.state, pid);
@@ -322,7 +537,7 @@ export class GameUIController {
           ${errHtml}
           <div class="muted" style="margin-bottom:8px">
             Seçili Bölge: <b>${selectedReg ? `${selectedReg.id} ${selectedReg.isCoastal ? '(🌊 Kıyı)' : '(Kara)'}` : 'Yok'}</b>
-            — Haritadan kendi boş bölgenize tıklayarak hedef bölgeyi değiştirebilirsiniz (normal ülkelerde bölge başına maks. 1 bina).
+            — Haritadan kendi boş bölgenize tıklayarak hedef bölgeyi değiştirebilirsiniz.
           </div>
           ${smallUpgradeSection}
           <div class="card-list">
@@ -348,7 +563,7 @@ export class GameUIController {
         </div>
       `;
 
-      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null));
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
       host.querySelector('#btn-upgrade-combined')?.addEventListener('click', (ev) => {
         const regId = (ev.currentTarget as HTMLButtonElement).dataset.reg || '';
         const res = startCombinedBuildingUpgrade(this.state, pid, regId);
@@ -422,7 +637,7 @@ export class GameUIController {
           </div>
         </div>
       `;
-      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null));
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
       host.querySelector('#btn-res-weapon')?.addEventListener('click', () => {
         const res = startTechResearch(this.state, pid, 'weapon');
         this.lastErrorMsg = res.ok ? '' : res.error || '';
@@ -481,7 +696,7 @@ export class GameUIController {
           </div>
         </div>
       `;
-      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null));
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
       host.querySelectorAll<HTMLButtonElement>('.btn-prod').forEach((btn) => {
         btn.addEventListener('click', () => {
           const qty = Math.max(
@@ -538,7 +753,7 @@ export class GameUIController {
           </div>
         </div>
       `;
-      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null));
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
       host.querySelector('#btn-train-submit')?.addEventListener('click', () => {
         const w = (document.getElementById('train-weapon') as HTMLSelectElement).value as WeaponId;
         const s = (document.getElementById('train-shield') as HTMLSelectElement).value as ShieldId;

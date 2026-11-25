@@ -1,5 +1,6 @@
 import { ECONOMY } from '../config/balance';
 import { buildRegionalTheater } from '../map/arenaBuilder';
+import { ensureAllDiplomacyPairs } from '../sim/diplomacy';
 import { placeInitialCountryBuildings } from '../sim/economy';
 import type { GameState, Point, WorldCountryFeature } from '../types';
 
@@ -65,5 +66,6 @@ export function startGameWithCountry(
     c.manpower = ECONOMY.START_MANPOWER;
   }
 
+  ensureAllDiplomacyPairs(state);
   placeInitialCountryBuildings(state);
 }
