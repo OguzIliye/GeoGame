@@ -3,8 +3,9 @@
 > Bu dosya [DESIGN.md](DESIGN.md) kapsamındaki tüm fazların durumunu takip eder. Her faz tamamlandığında otomatik test + temiz build + `PROGRESS.md` güncellemesi + `git commit` yapılır.
 
 ## Genel Durum
-- **Aktif Faz:** Faz 5 — Mid-Res Pixel Art, Animasyonlar, Çevre & Müzik
-- **Tamamlanan Fazlar:** 4 / 5
+- **Aktif Faz:** Tamamlandı (Faz 1 – Faz 5 eksiksiz bitti)
+- **Tamamlanan Fazlar:** 5 / 5
+- **Son Doğrulama (Test + Clean Build + Tarayıcı Uçtan Uca Kontrol):** [x] Tamamlandı (`18/18` Vitest testi geçti, `tsc --noEmit && vite build` sıfır hatayla derlendi, gerçek Chrome üzerinde Dünya Seçimi → Bölgesel Harita → Binalar/Üretim/Kışla → Savaş/Ordu Kümesi/Hareket Oku → Ayarlar/Müzik → 2020 Oyun Sonu Stat Tablosu sıfır çalışma zamanı hatasıyla doğrulandı.)
 
 ---
 
@@ -59,9 +60,9 @@
 ---
 
 ## Faz 5 — Mid-Res Pixel Art, Animasyonlar, Çevre & Müzik
-- [ ] Mid-res pixel art harita çevre & biyom öğeleri (**ağaç, dağ, çimen, çöl, deniz**) ve keskin piksel (`nearest-neighbor`) render
-- [ ] **Asker Animasyonları (Maks. Seviye Gösterim Kuralı):** Kümede yaşayan en yüksek silah + en yüksek kalkan görseli (`Idle`, `Yürüme`, `Savaş anı`; üst seviye askerler bitince otomatik alt seviyeye düşüş; bazuka/füze ateşi dahil)
-- [ ] **Bina Animasyonları:** `Idle` ve `Çalışır` animasyonları (Banka gibi sürekli aktif binalarda yalnızca `Çalışır` animasyonu)
-- [ ] **Transportasyon Gemisi:** Denizde seyir animasyonu
-- [ ] **Web Audio API Arka Plan Müziği** (retro/pixel-art döngüsel müzik) + **Ayarlar (Settings) Penceresi** (müzik ses seviyesi slider + susturma/mute)
-- [ ] Faz 5 otomatik testler + temiz build + tarayıcıda uçtan uca doğrulama + final git commit
+- [x] Mid-res pixel art harita çevre & biyom öğeleri (**ağaç, dağ, çimen, çöl, deniz**) ve keskin piksel (`nearest-neighbor`) render
+- [x] **Asker Animasyonları (Maks. Seviye Gösterim Kuralı):** Kümede yaşayan en yüksek silah + en yüksek kalkan görseli (`Idle`, `Yürüme`, `Savaş anı`; üst seviye askerler bitince otomatik alt seviyeye düşüş; bazuka/füze ateşi dahil)
+- [x] **Bina Animasyonları:** `Idle` ve `Çalışır` animasyonları (Banka gibi sürekli aktif binalarda yalnızca `Çalışır` animasyonu)
+- [x] **Transportasyon Gemisi:** Denizde seyir animasyonu
+- [x] **Web Audio API Arka Plan Müziği** (retro/pixel-art döngüsel müzik) + **Ayarlar (Settings) Penceresi** (müzik ses seviyesi slider + susturma/mute)
+- [x] Faz 5 otomatik testler + temiz build + tarayıcıda uçtan uca doğrulama + final git commit

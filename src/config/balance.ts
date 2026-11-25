@@ -13,7 +13,7 @@ export const ARENA_CONFIG = {
   /** Target area per region in projected map squared units (1 unit ≈ 1 degree at equator) */
   TARGET_REGION_AREA: 3.2,
   MAX_REGIONS_PER_COUNTRY: 48,
-  LLOYD_ITERATIONS: 3,
+  LLOYD_ITERATIONS: 2,
   MIN_BOX_HALF_W: 11,
   MIN_BOX_HALF_H: 7.5,
   MAX_BOX_HALF_W: 26,

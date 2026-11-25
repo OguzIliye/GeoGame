@@ -1,3 +1,4 @@
+import { RetroMusicController } from './audio/music';
 import { pickRegionAtPoint } from './map/arenaBuilder';
 import { fetchWorldCountries, pickWorldCountryAtPoint } from './map/worldLoader';
 import { MapCamera } from './render/camera';
@@ -30,9 +31,10 @@ async function bootstrap(): Promise<void> {
 
   const state = createInitialGameState();
   const camera = new MapCamera();
+  const music = new RetroMusicController();
   let worldCountries: WorldCountryFeature[] = [];
 
-  const ui = new GameUIController(uiLayer, state, () => {
+  const ui = new GameUIController(uiLayer, state, music, () => {
     state.phase = 'world_select';
     state.arena = null;
     state.countries = {};
@@ -45,6 +47,26 @@ async function bootstrap(): Promise<void> {
     camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, false);
     ui.forceRefresh();
   });
+
+  // Start Web Audio music loop on first user interaction (browser autoplay compliance)
+  window.addEventListener('pointerdown', () => music.ensureStarted(), { once: true });
+
+  // Expose live runtime handle for automated end-to-end verification
+  (window as unknown as Record<string, unknown>).__GEOGAME__ = {
+    state,
+    camera,
+    ui,
+    music,
+    getWorldCountries: () => worldCountries,
+    selectCountryByName: (name: string) => {
+      const found = worldCountries.find((c) => c.name === name);
+      if (!found) return false;
+      startGameWithCountry(state, found.id, worldCountries, found.centroid);
+      if (state.arena) camera.setBounds(state.arena, canvas.width, canvas.height, true);
+      ui.forceRefresh();
+      return true;
+    },
+  };
 
   function syncCursor(): void {
     if (state.phase === 'world_select') {

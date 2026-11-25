@@ -1,7 +1,7 @@
 import { CALENDAR, SHIELDS, WEAPONS } from '../config/balance';
 import type { GameState } from '../types';
 import { getTotalSoldiers, parseUnitKey } from './army';
-import { getCountryMoneyPerSec, getCountryRegions } from './economy';
+import { getActiveBuildingLevel, getCountryMoneyPerSec, getCountryRegions } from './economy';
 
 export interface CountryStanding {
   rank: number;
@@ -38,9 +38,7 @@ export function computeStandings(state: GameState): CountryStanding[] {
     const regionCount = regs.length;
     let buildingCount = 0;
     for (const r of regs) {
-      if (r.building && !r.building.constructing) {
-        buildingCount += r.building.level;
-      }
+      buildingCount += getActiveBuildingLevel(r.building);
     }
 
     let soldierCount = 0;

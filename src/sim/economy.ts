@@ -29,6 +29,11 @@ export function getCountryRegions(state: GameState, countryId: string): Region[]
   return Object.values(state.regions).filter((r) => r.ownerId === countryId);
 }
 
+export function getActiveBuildingLevel(b: Region['building']): number {
+  if (!b) return 0;
+  return b.constructing ? Math.max(0, b.level - 1) : b.level;
+}
+
 /** Count effective active building capacity for a country (including small-country Combined Building levels). */
 export function getEffectiveBuildingCount(
   state: GameState,
@@ -37,14 +42,16 @@ export function getEffectiveBuildingCount(
 ): number {
   let total = 0;
   for (const reg of Object.values(state.regions)) {
-    if (reg.ownerId !== countryId || !reg.building || reg.building.constructing) continue;
+    if (reg.ownerId !== countryId || !reg.building) continue;
+    const activeLv = getActiveBuildingLevel(reg.building);
+    if (activeLv <= 0) continue;
     if (reg.building.type === type) {
-      total += reg.building.level;
+      total += activeLv;
     } else if (reg.building.type === 'combined') {
       if (type === 'port') {
         if (reg.isCoastal) total += 1;
       } else {
-        total += reg.building.level;
+        total += activeLv;
       }
     }
   }

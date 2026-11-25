@@ -18,22 +18,21 @@ import {
 import { createInitialGameState, startGameWithCountry } from '../src/state/gameStore';
 
 const worldCountries = parseWorldTopology(rawTopoJson as unknown as Topology);
+const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
+const baseTurkeyState = createInitialGameState();
+startGameWithCountry(baseTurkeyState, turkey.id, worldCountries);
 
 describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
   it('takvimi 2000-2020 arası ilerletir, hız çarpanlarını ve Space durdur/başlat kuralını uygular', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
 
     expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2000');
 
-    // 2x hızda 1.5 gerçek saniye = 3 sim sn = 30 gün
     setGameSpeed(state, 2);
     const simDt = advanceClock(state, 1.5);
     expect(simDt).toBe(3);
     expect(state.simDaysElapsed).toBe(30);
 
-    // Space ile durdur -> önceki hızı hatırla
     togglePauseSpace(state);
     expect(state.speed).toBe(0);
     expect(advanceClock(state, 5)).toBe(0);
@@ -41,29 +40,23 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     togglePauseSpace(state);
     expect(state.speed).toBe(2);
 
-    // 2020 tavanı
     advanceClock(state, 5000);
     expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2020');
   });
 
   it('bina kurallarını, kıyı Liman şartını ve tüm binalar yıkılsa bile soft-lock taban gelirini korur', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
     const pid = turkey.id;
     const player = state.countries[pid];
 
-    // Başlangıçta 1 Banka + 1 Kışla -> 5 taban + 12 banka = 17 para/sn
     expect(getCountryMoneyPerSec(state, pid)).toBe(17);
     expect(getCountryHealthPct(state, pid)).toBe(50);
     expect(getCountryManpowerPerSec(state, pid)).toBe(1);
 
     const owned = getCountryRegions(state, pid);
     const occupied = owned.find((r) => r.building !== null)!;
-    // Aynı bölgeye 2. bina kurulamaz
     expect(startBuildingConstruction(state, pid, occupied.id, 'bank').ok).toBe(false);
 
-    // Kara bölgesine Liman kurulamaz, kıyı bölgesine kurulabilir
     const inland = owned.find((r) => !r.isCoastal && !r.building);
     if (inland) {
       expect(startBuildingConstruction(state, pid, inland.id, 'port').ok).toBe(false);
@@ -78,23 +71,19 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     expect(coastalEmpty.building?.constructing).toBe(false);
     expect(Object.values(state.ships).some((s) => s.homeRegionId === coastalEmpty.id)).toBe(true);
 
-    // Hastane kurulduğunda sağlık oranı ve manpower/s artar
     const emptyForHosp = owned.find((r) => !r.building)!;
     expect(startBuildingConstruction(state, pid, emptyForHosp.id, 'hospital').ok).toBe(true);
     tickEconomyAndQueues(state, 6.5);
     expect(getCountryHealthPct(state, pid)).toBe(65);
     expect(getCountryManpowerPerSec(state, pid)).toBe(3);
 
-    // Tüm binalar yıkılsa bile soft-lock olmaz (+5 para/s, +1 manpower/s)
     for (const r of owned) r.building = null;
     expect(getCountryMoneyPerSec(state, pid)).toBe(5);
     expect(getCountryManpowerPerSec(state, pid)).toBe(1);
   });
 
   it('Üniversite araştırması, Fabrika üretimi ve Kışla asker eğitimini süre bazlı çalıştırır; sadece önemli olayda bildirim çıkarır', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
     const pid = turkey.id;
     const player = state.countries[pid];
     player.money = 5000;

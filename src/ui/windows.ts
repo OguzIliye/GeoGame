@@ -1,3 +1,4 @@
+import { RetroMusicController } from '../audio/music';
 import {
   BUILDINGS,
   COMBINED_UPGRADE_COSTS,
@@ -47,12 +48,19 @@ export class GameUIController {
   lastErrorMsg = '';
   private root: HTMLDivElement;
   private state: GameState;
+  private music: RetroMusicController;
   private onReturnToWorld: () => void;
   private mountedPhase: string | null = null;
 
-  constructor(root: HTMLDivElement, state: GameState, onReturnToWorld: () => void) {
+  constructor(
+    root: HTMLDivElement,
+    state: GameState,
+    music: RetroMusicController,
+    onReturnToWorld: () => void,
+  ) {
     this.root = root;
     this.state = state;
+    this.music = music;
     this.onReturnToWorld = onReturnToWorld;
   }
 
@@ -203,6 +211,7 @@ export class GameUIController {
           <button class="pixel-btn speed-btn" data-speed="0.5">0.5x</button>
           <button class="pixel-btn speed-btn" data-speed="1">1x</button>
           <button class="pixel-btn speed-btn" data-speed="2">2x</button>
+          <button class="pixel-btn dock-btn" data-win="settings">🎵 Ayarlar</button>
         </div>
       </div>
 
@@ -843,6 +852,47 @@ export class GameUIController {
         this.renderModal();
       });
       this.updateLiveProgressInsideModal();
+      return;
+    }
+
+    if (this.activeWindow === 'settings') {
+      const volPct = Math.round(this.music.getVolume() * 100);
+      const muted = this.music.isMuted();
+      host.innerHTML = `
+        <div class="pixel-panel modal-window">
+          <div class="modal-header">
+            <strong>🎵 Ayarlar — Müzik & Kontroller</strong>
+            <button class="pixel-btn close-win">✕</button>
+          </div>
+          <div class="card-list">
+            <div class="card-row">
+              <label for="music-vol-slider"><strong>Arka Plan Müziği Ses Seviyesi:</strong> <span id="music-vol-label">%${volPct}</span></label>
+              <input id="music-vol-slider" type="range" min="0" max="100" value="${volPct}" style="width:200px;cursor:pointer" />
+            </div>
+            <div class="card-row">
+              <span><strong>Müzik Durumu:</strong> ${muted ? '🔇 Susturuldu' : '🔊 Açık'}</span>
+              <button class="pixel-btn" id="btn-music-mute">${muted ? '🔊 Sesi Aç' : '🔇 Sustur (Mute)'}</button>
+            </div>
+            <div class="muted" style="margin-top:6px">
+              Kontroller: Sol tık ordu/bölge seç & gönder | Sağ tık veya harita dışı tık: gönderme iptal | Asker → Gemi tıkla: gemiye bindir | Space: Durdur / Devam Et.
+            </div>
+          </div>
+        </div>
+      `;
+      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
+      const slider = host.querySelector('#music-vol-slider') as HTMLInputElement | null;
+      slider?.addEventListener('input', () => {
+        this.music.ensureStarted();
+        const pct = Number(slider.value);
+        this.music.setVolume(pct / 100);
+        const lbl = document.getElementById('music-vol-label');
+        if (lbl) lbl.textContent = `%${pct}`;
+      });
+      host.querySelector('#btn-music-mute')?.addEventListener('click', () => {
+        this.music.ensureStarted();
+        this.music.toggleMute();
+        this.renderModal();
+      });
     }
   }
 }

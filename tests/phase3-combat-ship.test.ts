@@ -22,49 +22,43 @@ import {
 import { createInitialGameState, startGameWithCountry } from '../src/state/gameStore';
 
 const worldCountries = parseWorldTopology(rawTopoJson as unknown as Topology);
+const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
+const baseTurkeyState = createInitialGameState();
+startGameWithCountry(baseTurkeyState, turkey.id, worldCountries);
 
 describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
   it('tür bazlı zorunlu ayırma (split), yakın küme birleştirme (merge) ve maks. seviye görsel düşüş kuralını uygular', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
     const pid = turkey.id;
 
     const stack = spawnUnitsIntoCountryBarracks(state, pid, 'sword:wood', 10)!;
     stack.units['bazooka:forcefield'] = 1;
 
-    // 1 bazukalı bile varsa maks. seviye bazuka + forcefield döner
     expect(getMaxTierVisualsForUnits(stack.units)).toEqual({
       weapon: 'bazooka',
       shield: 'forcefield',
     });
 
-    // Eksik tür belirtilirse ayırmayı reddeder ("her tür asker için ayrı bir ayırma sayısı belirtmek şart")
     expect(splitArmyStack(state, stack.id, { 'sword:wood': 4 }).ok).toBe(false);
 
-    // Tüm mevcut türler için sayı verildiğinde ayırır
     const splitRes = splitArmyStack(state, stack.id, {
       'sword:wood': 4,
       'bazooka:forcefield': 1,
     });
     expect(splitRes.ok).toBe(true);
     expect(stack.units['bazooka:forcefield']).toBeUndefined();
-    // Bazukalılar ayrılınca/bitince ana küme otomatik bir alt seviyeye (sword + wood) düşer!
     expect(getMaxTierVisualsForUnits(stack.units)).toEqual({
       weapon: 'sword',
       shield: 'wood',
     });
 
-    // Yakın kümeleri tekrar tek kümede birleştirir
     const mergeRes = mergeArmies(state, stack.id, splitRes.newArmy!.id);
     expect(mergeRes.ok).toBe(true);
     expect(getTotalSoldiers(stack.units)).toBe(11);
   });
 
   it('nötr ülkeye yanlış saldırıyı engeller; savaş ilanından sonra bölgeyi süreyle ele geçirip içindeki binayı yıkar', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
     const pid = turkey.id;
 
     const enemyId = Object.keys(state.countries).find((id) => id !== pid)!;
@@ -79,11 +73,8 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
     };
 
     const army = spawnUnitsIntoCountryBarracks(state, pid, 'ak:steel', 20)!;
-
-    // Savaş ilan edilmeden nötr toprağa girilemez
     expect(orderArmyMoveToRegion(state, army.id, targetReg.id).ok).toBe(false);
 
-    // Savaş ilan et -> yürü ve süreyle ele geçir
     expect(declareWar(state, pid, enemyId).ok).toBe(true);
     army.x = targetReg.centroid[0];
     army.y = targetReg.centroid[1];
@@ -95,18 +86,14 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
 
     tickArmiesCombatAndShips(state, 8);
     expect(targetReg.ownerId).toBe(pid);
-    // Bölge düşünce içindeki bina yıkılmış olmalı
     expect(targetReg.building).toBeNull();
   });
 
   it('zaman içinde savaşı yürütür ve düşenlerin %30 unu Hastaneye gönderip 8 sn sonra eski birlik türüyle döndürür', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
     const pid = turkey.id;
     const enemyId = Object.keys(state.countries).find((id) => id !== pid)!;
 
-    // Oyuncuya ayakta bir Hastane ver, düşmanın tüm hastanelerini sil
     const playerRegs = getCountryRegions(state, pid);
     const hospReg = playerRegs.find((r) => !r.building)!;
     hospReg.building = {
@@ -126,12 +113,10 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
 
     const myArmy = spawnUnitsIntoCountryBarracks(state, pid, 'pistol:diamond', 30)!;
     const foeArmy = spawnUnitsIntoCountryBarracks(state, enemyId, 'sword:wood', 25)!;
-    // Aynı noktada karşılaştır
     foeArmy.x = myArmy.x + 0.1;
     foeArmy.y = myArmy.y + 0.1;
     orderArmyAttackEnemyArmy(state, myArmy.id, foeArmy.id);
 
-    // Birkaç savaş tick'i çalıştır -> oyuncunun yaralıları hastaneye gitmeli, hastanesi olmayan düşmanınki gitmemeli
     for (let i = 0; i < 12; i++) {
       tickArmiesCombatAndShips(state, 0.5);
     }
@@ -141,7 +126,6 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
     expect(playerWounded.length).toBeGreaterThan(0);
     expect(playerWounded[0].units['pistol:diamond']).toBeGreaterThan(0);
 
-    // Yürüyüş + 8 sn hastane iyileşme süresi sonunda eski birlik türü ('pistol:diamond') olarak döner
     for (let i = 0; i < 25; i++) {
       tickArmiesCombatAndShips(state, 1);
     }
@@ -153,9 +137,7 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
   });
 
   it('Liman gemisiyle sınırsız kapasiteli asker bindirme, denizden seyir ve hedef kıyıya çıkartma yapar', () => {
-    const state = createInitialGameState();
-    const turkey = worldCountries.find((c) => c.name === 'Turkey')!;
-    startGameWithCountry(state, turkey.id, worldCountries);
+    const state = structuredClone(baseTurkeyState);
     const pid = turkey.id;
 
     const coastalRegs = getCountryRegions(state, pid).filter((r) => r.isCoastal && r.coastalAnchor);

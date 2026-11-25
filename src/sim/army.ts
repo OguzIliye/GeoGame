@@ -19,7 +19,7 @@ import type {
   WeaponId,
 } from '../types';
 import { canArmyEnterCountryTerritory, getRelationStatus } from './diplomacy';
-import { getCountryRegions, nextUid, pushImportantToast } from './economy';
+import { getActiveBuildingLevel, getCountryRegions, nextUid, pushImportantToast } from './economy';
 
 export function parseUnitKey(key: string): { weapon: WeaponId; shield: ShieldId } {
   const [w, s] = key.split(':');
@@ -335,7 +335,9 @@ export function findNearestHospitalRegion(
   let best: Region | null = null;
   let bestD2 = Infinity;
   for (const reg of Object.values(state.regions)) {
-    if (reg.ownerId !== countryId || !reg.building || reg.building.constructing) continue;
+    if (reg.ownerId !== countryId || getActiveBuildingLevel(reg.building) <= 0 || !reg.building) {
+      continue;
+    }
     if (reg.building.type !== 'hospital' && reg.building.type !== 'combined') continue;
     const dx = reg.centroid[0] - from[0];
     const dy = reg.centroid[1] - from[1];
@@ -736,8 +738,8 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
     if (
       !hospReg ||
       hospReg.ownerId !== w.countryId ||
+      getActiveBuildingLevel(hospReg.building) <= 0 ||
       !hospReg.building ||
-      hospReg.building.constructing ||
       (hospReg.building.type !== 'hospital' && hospReg.building.type !== 'combined')
     ) {
       const curPos: Point = [
