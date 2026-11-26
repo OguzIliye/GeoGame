@@ -3,8 +3,8 @@
 > Bu dosya [UPDATE_DESIGN.md](UPDATE_DESIGN.md) kapsamındaki tüm v1.1 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik test + temiz build + `UPDATE_PROGRESS.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 3 — Genişletilmiş Detaylı Pixel Art, Ülke Rengi Outline, World-Space Zoom & İkon Üreticisi
-- **Tamamlanan Aşamalar:** 2 / 4
+- **Aktif Aşama:** Aşama 4 — `Pixel World` Ana Ekranı, Opsiyonel Tutorial, Görsel Bilim Ağacı, Karşılaşma Popup'ı, İkonlu Birlikler & Hover Kısayollar
+- **Tamamlanan Aşamalar:** 3 / 4
 - **Son Doğrulama (Test + Clean Build + Tarayıcı Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -29,12 +29,12 @@
 ---
 
 ## Aşama 3 — Genişletilmiş Detaylı Pixel Art, Ülke Rengi Outline, World-Space Zoom & İkon Üreticisi
-- [ ] Genişletilmiş ve gölgelendirilmiş detaylı karakter (`~24×26`) ve bina (`~28×26`) mid-res pixel art sprite ızgaraları
-- [ ] Sahip ülkenin renginde kontrast korumalı piksel dış çizgi (`country-color pixel outline` + önbellekli `PixelGrid` span motoru)
-- [ ] Haritaya yakınlaştırdıkça bina, asker, gemi ve çevre öğelerinin harita ölçeğine sabit (`world-space fixed`) büyüyerek yakından incelenebilmesi
-- [ ] Çok parçalı kıvrımlı hareket oku, bina yerleştirme ghost önizlemesi (yeşil/kırmızı geçerlilik) ve belirgin oyuncu ordusu işaretçisi (`★` + dost halka + ping)
-- [ ] Birlik inceleme (`Silah + Kalkan` ayırt edilebilir) ve Bilim Ağacı node'ları için detaylı pixel-art ikon üreticisi + `PIXEL WORLD` ana ekran piksel sahnesi (Banka + Bazuka tutan asker + piksel logo)
-- [ ] Aşama 3 otomatik testler + temiz build + `UPDATE_PROGRESS.md` güncellemesi + git commit
+- [x] Genişletilmiş ve gölgelendirilmiş detaylı karakter (`~24×26`) ve bina (`~28×26`) mid-res pixel art sprite ızgaraları
+- [x] Sahip ülkenin renginde kontrast korumalı piksel dış çizgi (`country-color pixel outline` + önbellekli `PixelGrid` span motoru)
+- [x] Haritaya yakınlaştırdıkça bina, asker, gemi ve çevre öğelerinin harita ölçeğine sabit (`world-space fixed`) büyüyerek yakından incelenebilmesi
+- [x] Çok parçalı kıvrımlı hareket oku, bina yerleştirme ghost önizlemesi (yeşil/kırmızı geçerlilik) ve belirgin oyuncu ordusu işaretçisi (`★` + dost halka + ping)
+- [x] Birlik inceleme (`Silah + Kalkan` ayırt edilebilir) ve Bilim Ağacı node'ları için detaylı pixel-art ikon üreticisi + `PIXEL WORLD` ana ekran piksel sahnesi (Banka + Bazuka tutan asker + piksel logo)
+- [x] Aşama 3 otomatik testler + temiz build + `UPDATE_PROGRESS.md` güncellemesi + git commit
 
 ---
 

@@ -1,15 +1,30 @@
 import {
+  computeWorldSpritePixelStep,
   drawPixelArmyUnit,
   drawPixelBuilding,
   drawPixelTerrainProp,
   drawPixelTransportShip,
+  renderMainMenuPixelScene,
   type SoldierPose,
 } from '../art/pixelSprites';
 import { BUILDINGS } from '../config/balance';
 import { getMaxTierVisualsForUnits, getTotalSoldiers } from '../sim/army';
-import { isBuildingWorking } from '../sim/economy';
-import type { BuildingType, GameState, MultiPolygonCoords, Region, WorldCountryFeature } from '../types';
+import {
+  getRegionBuildingPoint,
+  isBuildingWorking,
+  validateBuildingPlacementAtPoint,
+} from '../sim/economy';
+import type {
+  BuildingType,
+  GameState,
+  MultiPolygonCoords,
+  Point,
+  Region,
+  WorldCountryFeature,
+} from '../types';
 import { MapCamera } from './camera';
+
+export { renderMainMenuPixelScene };
 
 const BUILDING_SHORT: Record<BuildingType, string> = {
   barracks: 'KŞL',
@@ -53,7 +68,6 @@ function drawSeaBackground(
   ctx.fillStyle = '#0e2a47';
   ctx.fillRect(0, 0, viewW, viewH);
 
-  // Mid-res pixel-art animated sea waves & crests
   const stepPx = 42;
   const phase = Math.floor(realTimeMs / 420) % 3;
   const offsetX = ((-camera.cx * camera.scale) % stepPx + stepPx) % stepPx;
@@ -137,7 +151,71 @@ function mixHexWithBiome(hex: string, biome: Region['biome']): string {
   return `rgb(${mr}, ${mg}, ${mb})`;
 }
 
-/** Draw an animated pixel-style movement arrow between two screen points. */
+/** Draw an animated multi-segment pixel-style movement arrow along screen waypoints. */
+export function drawAnimatedRouteArrow(
+  ctx: CanvasRenderingContext2D,
+  pts: Point[],
+  color: string,
+  realTimeMs: number,
+): void {
+  if (pts.length < 2) return;
+
+  let totalLen = 0;
+  const segLens: number[] = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    segLens.push(len);
+    totalLen += len;
+  }
+  if (totalLen < 6) return;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([8, 6]);
+  ctx.lineDashOffset = -((realTimeMs * 0.04) % 14);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(pts[0][0]), Math.round(pts[0][1]));
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(Math.round(pts[i][0]), Math.round(pts[i][1]));
+  }
+  ctx.stroke();
+
+  ctx.setLineDash([]);
+  const last = pts[pts.length - 1];
+  const prev = pts[pts.length - 2];
+  const endAngle = Math.atan2(last[1] - prev[1], last[0] - prev[0]);
+  const headLen = 10;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(last[0], last[1]);
+  ctx.lineTo(last[0] - headLen * Math.cos(endAngle - 0.5), last[1] - headLen * Math.sin(endAngle - 0.5));
+  ctx.lineTo(last[0] - headLen * Math.cos(endAngle + 0.5), last[1] - headLen * Math.sin(endAngle + 0.5));
+  ctx.closePath();
+  ctx.fill();
+
+  // Animated traveling chevron along the route
+  const targetDist = ((realTimeMs % 1200) / 1200) * totalLen;
+  let acc = 0;
+  for (let i = 0; i < segLens.length; i++) {
+    if (acc + segLens[i] >= targetDist || i === segLens.length - 1) {
+      const localT = segLens[i] > 0 ? Math.min(1, (targetDist - acc) / segLens[i]) : 0;
+      const mx = pts[i][0] + (pts[i + 1][0] - pts[i][0]) * localT;
+      const my = pts[i][1] + (pts[i + 1][1] - pts[i][1]) * localT;
+      const ang = Math.atan2(pts[i + 1][1] - pts[i][1], pts[i + 1][0] - pts[i][0]);
+      ctx.beginPath();
+      ctx.moveTo(mx + 6 * Math.cos(ang), my + 6 * Math.sin(ang));
+      ctx.lineTo(mx - 5 * Math.cos(ang - 0.6), my - 5 * Math.sin(ang - 0.6));
+      ctx.lineTo(mx - 5 * Math.cos(ang + 0.6), my - 5 * Math.sin(ang + 0.6));
+      ctx.closePath();
+      ctx.fill();
+      break;
+    }
+    acc += segLens[i];
+  }
+  ctx.restore();
+}
+
 export function drawAnimatedMovementArrow(
   ctx: CanvasRenderingContext2D,
   x1: number,
@@ -147,42 +225,7 @@ export function drawAnimatedMovementArrow(
   color: string,
   realTimeMs: number,
 ): void {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const dist = Math.hypot(dx, dy);
-  if (dist < 6) return;
-
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.setLineDash([8, 6]);
-  ctx.lineDashOffset = -((realTimeMs * 0.045) % 14);
-  ctx.beginPath();
-  ctx.moveTo(Math.round(x1), Math.round(y1));
-  ctx.lineTo(Math.round(x2), Math.round(y2));
-  ctx.stroke();
-
-  ctx.setLineDash([]);
-  const angle = Math.atan2(dy, dx);
-  const headLen = 10;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(x2, y2);
-  ctx.lineTo(x2 - headLen * Math.cos(angle - 0.5), y2 - headLen * Math.sin(angle - 0.5));
-  ctx.lineTo(x2 - headLen * Math.cos(angle + 0.5), y2 - headLen * Math.sin(angle + 0.5));
-  ctx.closePath();
-  ctx.fill();
-
-  const t = (realTimeMs % 1000) / 1000;
-  const mx = x1 + dx * t;
-  const my = y1 + dy * t;
-  ctx.beginPath();
-  ctx.moveTo(mx + 6 * Math.cos(angle), my + 6 * Math.sin(angle));
-  ctx.lineTo(mx - 5 * Math.cos(angle - 0.6), my - 5 * Math.sin(angle - 0.6));
-  ctx.lineTo(mx - 5 * Math.cos(angle + 0.6), my - 5 * Math.sin(angle + 0.6));
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
+  drawAnimatedRouteArrow(ctx, [[x1, y1], [x2, y2]], color, realTimeMs);
 }
 
 export function renderRegionalTheater(
@@ -208,8 +251,19 @@ export function renderRegionalTheater(
   }
 
   const regionList = Object.values(state.regions);
+  const spriteStep = computeWorldSpritePixelStep(camera.scale);
 
-  // 1. Coastal shallow water rim + Region political/biome fills (strictly active <= 16 countries only!)
+  const placementCheck =
+    state.placingBuildingType && state.placementHoverPoint && state.playerCountryId
+      ? validateBuildingPlacementAtPoint(
+          state,
+          state.playerCountryId,
+          state.placingBuildingType,
+          state.placementHoverPoint,
+        )
+      : null;
+
+  // 1. Coastal shallow water rim + Region political/biome fills
   for (const reg of regionList) {
     if (!reg.isCoastal) continue;
     traceMultiPolygon(ctx, reg.polygons, camera, viewW, viewH);
@@ -222,82 +276,108 @@ export function renderRegionalTheater(
     const owner = state.countries[reg.ownerId];
     if (!owner) continue;
     const isSelected = reg.id === state.selectedRegionId;
+    const isHoveredPlacement = placementCheck?.region?.id === reg.id;
+
     traceMultiPolygon(ctx, reg.polygons, camera, viewW, viewH);
     ctx.fillStyle = mixHexWithBiome(owner.color, reg.biome);
     ctx.fill();
 
-    ctx.lineWidth = isSelected ? 2.5 : owner.isPlayer ? 1.5 : 1.1;
-    ctx.strokeStyle = isSelected
-      ? '#fde047'
-      : owner.isPlayer
-        ? 'rgba(255, 255, 255, 0.55)'
-        : 'rgba(15, 23, 42, 0.5)';
+    if (isHoveredPlacement && placementCheck) {
+      ctx.fillStyle = placementCheck.ok ? 'rgba(34, 197, 94, 0.24)' : 'rgba(239, 68, 68, 0.26)';
+      ctx.fill();
+    }
+
+    ctx.lineWidth = isHoveredPlacement ? 3 : isSelected ? 2.5 : owner.isPlayer ? 1.6 : 1.1;
+    ctx.strokeStyle = isHoveredPlacement
+      ? placementCheck?.ok
+        ? '#4ade80'
+        : '#f87171'
+      : isSelected
+        ? '#fde047'
+        : owner.isPlayer
+          ? 'rgba(255, 255, 255, 0.6)'
+          : 'rgba(15, 23, 42, 0.5)';
     ctx.stroke();
   }
 
-  // 2. Mid-res pixel-art environment props (tree, mountain, grass, cactus, dune)
+  // 2. Mid-res pixel-art environment props (world-space scaled!)
+  const cullMargin = Math.max(40, spriteStep * 20);
   for (const reg of regionList) {
     for (const prop of reg.props) {
       const [px, py] = camera.mapToScreen(prop.x, prop.y, viewW, viewH);
-      if (px < -24 || px > viewW + 24 || py < -24 || py > viewH + 24) continue;
+      if (px < -cullMargin || px > viewW + cullMargin || py < -cullMargin || py > viewH + cullMargin) {
+        continue;
+      }
       drawPixelTerrainProp(ctx, prop, px, py, camera.scale, realTimeMs);
     }
   }
 
-  // 3. Pixel-art Buildings (Idle vs Active animations; Bank & Combined always Active!) & Capture bars
+  // 3. Pixel-art Buildings at their actual (x, y) coordinates + Country-color outline + World-space zoom!
   for (const reg of regionList) {
-    const [bx, by] = camera.mapToScreen(reg.centroid[0], reg.centroid[1], viewW, viewH);
     const owner = state.countries[reg.ownerId];
 
     if (reg.building && owner) {
       const b = reg.building;
+      const [bMapX, bMapY] = getRegionBuildingPoint(reg);
+      const [bx, by] = camera.mapToScreen(bMapX, bMapY, viewW, viewH);
       const working = isBuildingWorking(state, owner, reg);
       const pct = b.totalSec > 0 ? Math.min(1, b.progressSec / b.totalSec) : 1;
-      drawPixelBuilding(ctx, b.type, bx, by - 2, owner.color, working, b.constructing, pct, realTimeMs);
 
-      if (camera.scale >= 14) {
-        const label =
-          BUILDING_SHORT[b.type] ??
-          BUILDINGS[b.type].name.slice(0, 3);
+      drawPixelBuilding(
+        ctx,
+        b.type,
+        bx,
+        by,
+        owner.color,
+        working,
+        b.constructing,
+        pct,
+        realTimeMs,
+        camera.scale,
+      );
+
+      if (camera.scale >= 16) {
+        const label = BUILDING_SHORT[b.type] ?? BUILDINGS[b.type].name.slice(0, 3);
         ctx.save();
-        ctx.font = 'bold 9px "Courier New", monospace';
+        ctx.font = 'bold 10px "Courier New", monospace';
         ctx.textAlign = 'center';
+        ctx.fillStyle = '#090d16';
+        ctx.fillText(label, Math.round(bx + 1), Math.round(by + 11 * spriteStep + 9));
         ctx.fillStyle = '#fef08a';
-        ctx.fillText(label, Math.round(bx), Math.round(by + 16));
+        ctx.fillText(label, Math.round(bx), Math.round(by + 11 * spriteStep + 8));
         ctx.restore();
       }
     }
 
     if (reg.capture) {
+      const [cx, cy] = camera.mapToScreen(reg.centroid[0], reg.centroid[1], viewW, viewH);
       const pct = Math.min(1, reg.capture.elapsedSec / Math.max(0.1, reg.capture.requiredSec));
       const atkColor = state.countries[reg.capture.attackerCountryId]?.color ?? '#ef4444';
       ctx.save();
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(Math.round(bx - 20), Math.round(by + 18), 40, 6);
+      ctx.fillRect(Math.round(cx - 22), Math.round(cy + 20), 44, 7);
       ctx.fillStyle = atkColor;
-      ctx.fillRect(Math.round(bx - 19), Math.round(by + 19), Math.round(38 * pct), 4);
+      ctx.fillRect(Math.round(cx - 21), Math.round(cy + 21), Math.round(42 * pct), 5);
       ctx.strokeStyle = '#f8fafc';
       ctx.lineWidth = 1;
-      ctx.strokeRect(Math.round(bx - 20), Math.round(by + 18), 40, 6);
+      ctx.strokeRect(Math.round(cx - 22), Math.round(cy + 20), 44, 7);
       ctx.restore();
     }
   }
 
-  // 4. Animated movement arrows for armies & sailing ships
+  // 4. Multi-segment animated movement arrows for armies & sailing ships
   for (const army of Object.values(state.armies)) {
     if (army.targetX !== null && army.targetY !== null) {
-      const [x1, y1] = camera.mapToScreen(army.x, army.y, viewW, viewH);
-      const [x2, y2] = camera.mapToScreen(army.targetX, army.targetY, viewW, viewH);
+      const routeMapPts: Point[] =
+        army.waypoints && army.waypoints.length > 0
+          ? [[army.x, army.y], ...army.waypoints]
+          : [
+              [army.x, army.y],
+              [army.targetX, army.targetY],
+            ];
+      const screenPts = routeMapPts.map(([mx, my]) => camera.mapToScreen(mx, my, viewW, viewH));
       const isPlayer = army.countryId === state.playerCountryId;
-      drawAnimatedMovementArrow(
-        ctx,
-        x1,
-        y1,
-        x2,
-        y2,
-        isPlayer ? '#fde047' : '#fca5a5',
-        realTimeMs,
-      );
+      drawAnimatedRouteArrow(ctx, screenPts, isPlayer ? '#fde047' : '#fca5a5', realTimeMs);
     }
   }
 
@@ -309,7 +389,7 @@ export function renderRegionalTheater(
     }
   }
 
-  // 5. Pixel-art Transport Ships on sea (sailing wake animation!)
+  // 5. Pixel-art Transport Ships on sea (world-space scaled!)
   for (const ship of Object.values(state.ships)) {
     const owner = state.countries[ship.countryId];
     if (!owner) continue;
@@ -318,9 +398,17 @@ export function renderRegionalTheater(
     const isSel = ship.id === state.selectedShipId;
     const sailing = ship.targetX !== null && ship.targetY !== null;
 
-    drawPixelTransportShip(ctx, sx, sy, owner.color, sailing, isSel, realTimeMs);
+    drawPixelTransportShip(ctx, sx, sy, owner.color, sailing, isSel, realTimeMs, camera.scale);
     if (carried > 0) {
-      drawPixelTag(ctx, `⚓${carried}`, sx, sy - 24, '#fef08a', '#0f172a');
+      drawPixelTag(
+        ctx,
+        owner.isPlayer ? `★⚓${carried}` : `⚓${carried}`,
+        sx,
+        sy - 14 * spriteStep - 8,
+        '#fef08a',
+        '#0f172a',
+        owner.isPlayer ? '#facc15' : '#334155',
+      );
     }
   }
 
@@ -329,17 +417,24 @@ export function renderRegionalTheater(
     const wx = w.from[0] + (w.to[0] - w.from[0]) * w.travelProgress;
     const wy = w.from[1] + (w.to[1] - w.from[1]) * w.travelProgress;
     const [sx, sy] = camera.mapToScreen(wx, wy, viewW, viewH);
+    const r = Math.max(5, Math.round(spriteStep * 2.5));
     ctx.save();
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(Math.round(sx - 5), Math.round(sy - 5), 10, 10);
+    ctx.fillRect(Math.round(sx - r), Math.round(sy - r), r * 2, r * 2);
     ctx.fillStyle = '#ef4444';
-    ctx.fillRect(Math.round(sx - 1), Math.round(sy - 4), 2, 8);
-    ctx.fillRect(Math.round(sx - 4), Math.round(sy - 1), 8, 2);
+    ctx.fillRect(Math.round(sx - 1), Math.round(sy - r + 1), 2, r * 2 - 2);
+    ctx.fillRect(Math.round(sx - r + 1), Math.round(sy - 1), r * 2 - 2, 2);
     ctx.restore();
   }
 
-  // 7. Mid-res Pixel-art Army Stacks (Max-Tier Weapon + Max-Tier Shield, Idle/Walk/Combat animations!)
-  for (const army of Object.values(state.armies)) {
+  // 7. Army Stacks — AI first, Player on top Z-order for maximum clarity!
+  const sortedArmies = Object.values(state.armies).sort((a, b) => {
+    const ap = a.countryId === state.playerCountryId ? 1 : 0;
+    const bp = b.countryId === state.playerCountryId ? 1 : 0;
+    return ap - bp;
+  });
+
+  for (const army of sortedArmies) {
     const owner = state.countries[army.countryId];
     if (!owner) continue;
     const count = getTotalSoldiers(army.units);
@@ -359,34 +454,76 @@ export function renderRegionalTheater(
       facingRight = army.targetX >= army.x;
     }
 
+    // Distinct pulsing ground beacon for ALL player armies so you never lose track of your forces!
+    if (owner.isPlayer) {
+      const pulse = 1 + 0.14 * Math.sin(realTimeMs * 0.006);
+      const ringW = Math.max(22, Math.round(22 * spriteStep * pulse));
+      const ringH = Math.max(9, Math.round(8 * spriteStep * pulse));
+      ctx.save();
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.24)';
+      ctx.fillRect(Math.round(ax - ringW * 0.5), Math.round(ay + 4 * spriteStep), ringW, ringH);
+      ctx.strokeStyle = isSel ? '#fde047' : '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.round(ax - ringW * 0.5), Math.round(ay + 4 * spriteStep), ringW, ringH);
+      ctx.restore();
+    }
+
     if (isSel) {
+      const boxHalf = Math.max(18, Math.round(14 * spriteStep));
       ctx.save();
       ctx.strokeStyle = '#fde047';
       ctx.lineWidth = 2;
-      ctx.strokeRect(Math.round(ax - 18), Math.round(ay - 24), 36, 36);
+      ctx.strokeRect(
+        Math.round(ax - boxHalf),
+        Math.round(ay - boxHalf * 1.15),
+        boxHalf * 2,
+        Math.round(boxHalf * 1.95),
+      );
       ctx.restore();
     }
 
     drawPixelArmyUnit(
       ctx,
       ax,
-      ay - 4,
+      ay,
       weapon,
       shield,
       pose,
       facingRight,
-      owner.isPlayer ? '#2563eb' : owner.color,
+      owner.color,
       realTimeMs,
+      camera.scale,
     );
 
     drawPixelTag(
       ctx,
-      `${count}`,
+      owner.isPlayer ? `★ ${count}` : `${count}`,
       ax,
-      ay + 18,
-      '#ffffff',
-      owner.isPlayer ? '#1d4ed8' : 'rgba(15, 23, 42, 0.9)',
+      ay + Math.max(18, Math.round(11 * spriteStep + 8)),
+      owner.isPlayer ? '#fef08a' : '#ffffff',
+      owner.isPlayer ? '#1e3a8a' : 'rgba(15, 23, 42, 0.92)',
+      owner.isPlayer ? '#facc15' : '#475569',
     );
+  }
+
+  // 7.5 Q-Focus Ping Ring Animation around focused player army/ship
+  if (state.focusPing) {
+    const nowRef = state.focusPing.startedRealMs > 1e11 ? Date.now() : realTimeMs;
+    const elapsed = nowRef - state.focusPing.startedRealMs;
+    if (elapsed >= 0 && elapsed <= 1350) {
+      const t = elapsed / 1350;
+      const [px, py] = camera.mapToScreen(state.focusPing.x, state.focusPing.y, viewW, viewH);
+      const rad = Math.round(20 + t * 56);
+      ctx.save();
+      ctx.strokeStyle = `rgba(250, 204, 21, ${(1 - t).toFixed(2)})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(Math.round(px - rad), Math.round(py - rad), rad * 2, rad * 2);
+      const inner = Math.round(12 + t * 28);
+      ctx.strokeStyle = `rgba(56, 189, 248, ${(1 - t * 0.85).toFixed(2)})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.round(px - inner), Math.round(py - inner), inner * 2, inner * 2);
+      ctx.restore();
+    }
   }
 
   // 8. Country name banners
@@ -410,6 +547,55 @@ export function renderRegionalTheater(
       sy - 28,
       country.isPlayer ? '#fef08a' : '#f8fafc',
       'rgba(15, 23, 42, 0.78)',
+      country.isPlayer ? '#eab308' : '#334155',
+    );
+  }
+
+  // 9. Interactive Mouse Building Placement Ghost Preview
+  if (state.placingBuildingType && state.placementHoverPoint && state.playerCountryId) {
+    const [gx, gy] = camera.mapToScreen(
+      state.placementHoverPoint[0],
+      state.placementHoverPoint[1],
+      viewW,
+      viewH,
+    );
+    const pColor = state.countries[state.playerCountryId]?.color ?? '#3b82f6';
+    const isOk = Boolean(placementCheck?.ok);
+    const frameHalf = Math.max(20, Math.round(14 * spriteStep));
+
+    ctx.save();
+    ctx.globalAlpha = 0.78;
+    drawPixelBuilding(
+      ctx,
+      state.placingBuildingType,
+      gx,
+      gy,
+      pColor,
+      true,
+      false,
+      1,
+      realTimeMs,
+      camera.scale,
+    );
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = isOk ? '#4ade80' : '#ef4444';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.strokeRect(Math.round(gx - frameHalf), Math.round(gy - frameHalf), frameHalf * 2, frameHalf * 2);
+    ctx.restore();
+
+    const spec = BUILDINGS[state.placingBuildingType];
+    const msg = isOk
+      ? `✓ ${spec.name} Kur (${spec.cost}💰) — Sol Tık`
+      : `✕ ${placementCheck?.reason ?? 'Buraya kurulamaz'}`;
+    drawPixelTag(
+      ctx,
+      msg,
+      gx,
+      gy + frameHalf + 14,
+      isOk ? '#bbf7d0' : '#fecaca',
+      isOk ? 'rgba(20, 83, 45, 0.94)' : 'rgba(69, 10, 10, 0.94)',
+      isOk ? '#4ade80' : '#ef4444',
     );
   }
 }
@@ -421,6 +607,7 @@ export function drawPixelTag(
   sy: number,
   fg: string,
   bg: string,
+  borderColor = '#334155',
 ): void {
   ctx.save();
   ctx.font = 'bold 11px "Courier New", monospace';
@@ -431,7 +618,7 @@ export function drawPixelTag(
   const ry = Math.round(sy - h * 0.5);
   ctx.fillStyle = bg;
   ctx.fillRect(rx, ry, w, h);
-  ctx.strokeStyle = '#334155';
+  ctx.strokeStyle = borderColor;
   ctx.lineWidth = 1;
   ctx.strokeRect(rx, ry, w, h);
   ctx.fillStyle = fg;
