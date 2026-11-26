@@ -23,15 +23,15 @@ const baseTurkeyState = createInitialGameState();
 startGameWithCountry(baseTurkeyState, turkey.id, worldCountries);
 
 describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
-  it('takvimi 2000-2020 arası ilerletir, hız çarpanlarını ve Space durdur/başlat kuralını uygular', () => {
+  it('takvimi 2000-2010 (~4 saat) arası ilerletir, hız çarpanlarını ve Space durdur/başlat kuralını uygular', () => {
     const state = structuredClone(baseTurkeyState);
 
     expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2000');
 
     setGameSpeed(state, 2);
-    const simDt = advanceClock(state, 1.5);
-    expect(simDt).toBe(3);
-    expect(state.simDaysElapsed).toBe(30);
+    const simDt = advanceClock(state, 2);
+    expect(simDt).toBe(4);
+    expect(state.simDaysElapsed).toBe(1); // 4 sim sec * 0.25 day/sec = 1 in-game day
 
     togglePauseSpace(state);
     expect(state.speed).toBe(0);
@@ -40,8 +40,8 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     togglePauseSpace(state);
     expect(state.speed).toBe(2);
 
-    advanceClock(state, 5000);
-    expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2020');
+    advanceClock(state, 10000);
+    expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2010');
   });
 
   it('bina kurallarını, kıyı Liman şartını ve tüm binalar yıkılsa bile soft-lock taban gelirini korur', () => {

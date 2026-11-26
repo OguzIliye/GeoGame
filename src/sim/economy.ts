@@ -7,12 +7,14 @@ import {
   WEAPON_ORDER,
   WEAPONS,
 } from '../config/balance';
+import { pickRegionAtPoint } from '../map/arenaBuilder';
 import type {
   ArmyStack,
   BuildingType,
   Country,
   GameState,
   ImportantToast,
+  Point,
   Region,
   ShieldId,
   TransportShip,
@@ -27,6 +29,19 @@ export function nextUid(prefix: string): string {
 
 export function getCountryRegions(state: GameState, countryId: string): Region[] {
   return Object.values(state.regions).filter((r) => r.ownerId === countryId);
+}
+
+export function getRegionBuildingPoint(reg: Region): Point {
+  return [reg.building?.x ?? reg.centroid[0], reg.building?.y ?? reg.centroid[1]];
+}
+
+export function clearPropsUnderBuilding(reg: Region, bx: number, by: number, radius = 0.44): void {
+  const r2 = radius * radius;
+  reg.props = reg.props.filter((p) => {
+    const dx = p.x - bx;
+    const dy = p.y - by;
+    return dx * dx + dy * dy > r2;
+  });
 }
 
 export function getActiveBuildingLevel(b: Region['building']): number {
@@ -95,7 +110,10 @@ export function placeInitialCountryBuildings(state: GameState): void {
         constructing: false,
         progressSec: 0,
         totalSec: 0,
+        x: target.centroid[0],
+        y: target.centroid[1],
       };
+      clearPropsUnderBuilding(target, target.centroid[0], target.centroid[1]);
       if (target.isCoastal) {
         ensurePortShipForRegion(state, target);
       }
@@ -108,7 +126,10 @@ export function placeInitialCountryBuildings(state: GameState): void {
         constructing: false,
         progressSec: 0,
         totalSec: 0,
+        x: sorted[0].centroid[0],
+        y: sorted[0].centroid[1],
       };
+      clearPropsUnderBuilding(sorted[0], sorted[0].centroid[0], sorted[0].centroid[1]);
       if (sorted[1]) {
         sorted[1].building = {
           type: 'barracks',
@@ -116,7 +137,10 @@ export function placeInitialCountryBuildings(state: GameState): void {
           constructing: false,
           progressSec: 0,
           totalSec: 0,
+          x: sorted[1].centroid[0],
+          y: sorted[1].centroid[1],
         };
+        clearPropsUnderBuilding(sorted[1], sorted[1].centroid[0], sorted[1].centroid[1]);
       }
     }
   }
@@ -144,11 +168,41 @@ export function ensurePortShipForRegion(state: GameState, reg: Region): Transpor
   return ship;
 }
 
+export function validateBuildingPlacementAtPoint(
+  state: GameState,
+  countryId: string,
+  type: Exclude<BuildingType, 'combined'>,
+  pt: Point,
+): { ok: boolean; region: Region | null; reason?: string } {
+  const country = state.countries[countryId];
+  if (!country) return { ok: false, region: null, reason: 'Geçersiz ülke.' };
+
+  const reg = pickRegionAtPoint(pt, state.regions);
+  if (!reg) {
+    return { ok: false, region: null, reason: 'Haritada geçerli bir kara noktası seçin.' };
+  }
+  if (reg.ownerId !== countryId) {
+    return { ok: false, region: reg, reason: 'Yalnızca kendi toprağınıza bina kurabilirsiniz.' };
+  }
+  if (reg.building !== null) {
+    return { ok: false, region: reg, reason: 'Bu bölgede zaten bir bina var (maks. 1).' };
+  }
+  if (type === 'port' && !reg.isCoastal) {
+    return { ok: false, region: reg, reason: 'Liman yalnızca kıyı bölgesine kurulabilir.' };
+  }
+  const spec = BUILDINGS[type];
+  if (country.money < spec.cost) {
+    return { ok: false, region: reg, reason: `Yetersiz para (${spec.cost} gerekli).` };
+  }
+  return { ok: true, region: reg };
+}
+
 export function startBuildingConstruction(
   state: GameState,
   countryId: string,
   regionId: string,
   type: Exclude<BuildingType, 'combined'>,
+  customPoint?: Point,
 ): { ok: boolean; error?: string } {
   const country = state.countries[countryId];
   const reg = state.regions[regionId];
@@ -157,6 +211,17 @@ export function startBuildingConstruction(
   if (reg.building !== null) return { ok: false, error: 'Bu bölgede zaten bir bina var (maks. 1).' };
   if (type === 'port' && !reg.isCoastal) {
     return { ok: false, error: 'Liman yalnızca denize kıyısı olan bölgelere kurulabilir.' };
+  }
+
+  let bx = reg.centroid[0];
+  let by = reg.centroid[1];
+  if (customPoint) {
+    const hit = pickRegionAtPoint(customPoint, { [reg.id]: reg });
+    if (!hit) {
+      return { ok: false, error: 'Seçilen nokta bu bölgenin sınırları içinde değil.' };
+    }
+    bx = customPoint[0];
+    by = customPoint[1];
   }
 
   const spec = BUILDINGS[type];
@@ -169,7 +234,10 @@ export function startBuildingConstruction(
     constructing: true,
     progressSec: 0,
     totalSec: spec.buildSec,
+    x: bx,
+    y: by,
   };
+  clearPropsUnderBuilding(reg, bx, by);
   return { ok: true };
 }
 
@@ -374,14 +442,16 @@ export function spawnUnitsIntoCountryBarracks(
         (r.building.type === 'barracks' || r.building.type === 'combined'),
     ) ?? owned[0];
 
-  // Merge into an idle friendly stack already standing in spawnRegion
+  const [sx, sy] = getRegionBuildingPoint(spawnRegion);
+
+  // Merge into an idle friendly stack already standing near the barracks
   const existing = Object.values(state.armies).find(
     (a) =>
       a.countryId === countryId &&
       a.currentRegionId === spawnRegion.id &&
       a.targetX === null &&
       a.inCombatWithArmyId === null &&
-      Math.hypot(a.x - spawnRegion.centroid[0], a.y - spawnRegion.centroid[1]) < 0.45,
+      Math.hypot(a.x - sx, a.y - sy) < 0.45,
   );
 
   if (existing) {
@@ -392,12 +462,13 @@ export function spawnUnitsIntoCountryBarracks(
   const stack: ArmyStack = {
     id: nextUid('army'),
     countryId,
-    x: spawnRegion.centroid[0],
-    y: spawnRegion.centroid[1],
+    x: sx,
+    y: sy,
     currentRegionId: spawnRegion.id,
     units: { [unitKey]: count },
     targetX: null,
     targetY: null,
+    waypoints: [],
     targetRegionId: null,
     targetArmyId: null,
     inCombatWithArmyId: null,

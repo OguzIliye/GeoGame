@@ -6,7 +6,7 @@ import type { GameState, Point, WorldCountryFeature } from '../types';
 
 export function createInitialGameState(): GameState {
   return {
-    phase: 'world_select',
+    phase: 'main_menu',
     selectedWorldCountryId: null,
     hoveredWorldCountryId: null,
     simDaysElapsed: 0,
@@ -26,6 +26,15 @@ export function createInitialGameState(): GameState {
     selectedShipId: null,
     selectedRegionId: null,
     moveOrderMode: false,
+    placingBuildingType: null,
+    placementHoverPoint: null,
+    autoPauseReasons: [],
+    activeEncounter: null,
+    encounterCooldownUntilSimSec: {},
+    armyFocusIndex: -1,
+    focusPing: null,
+    tutorialSeen: false,
+    tutorialPromptOpen: false,
     toasts: [],
     endReason: null,
   };
@@ -58,6 +67,14 @@ export function startGameWithCountry(
   state.selectedShipId = null;
   state.selectedRegionId = null;
   state.moveOrderMode = false;
+  state.placingBuildingType = null;
+  state.placementHoverPoint = null;
+  state.autoPauseReasons = [];
+  state.activeEncounter = null;
+  state.encounterCooldownUntilSimSec = {};
+  state.armyFocusIndex = -1;
+  state.focusPing = null;
+  state.tutorialPromptOpen = false;
   state.endReason = null;
   state.toasts = [];
 

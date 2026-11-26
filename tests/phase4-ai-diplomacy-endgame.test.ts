@@ -77,12 +77,12 @@ describe('Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu', () => {
     expect(totalAiBuildings).toBeGreaterThan(aiIds.length);
   });
 
-  it('tüm toprakları kaybedince yenilgiyi ve 2020 bitiş tarihinde stat karşılaştırma sıralamasını hesaplar', () => {
+  it('tüm toprakları kaybedince yenilgiyi ve kampanya bitiş tarihinde stat karşılaştırma sıralamasını hesaplar', () => {
     const state = structuredClone(baseTurkeyState);
     const pid = turkeyFeature.id;
 
-    // 1. 2020 bitiş tarihi -> stat karşılaştırması
-    advanceClock(state, 800); // 8000 gün -> 2020 tavanı
+    // 1. 2010 (~4 saat) bitiş tarihi -> stat karşılaştırması
+    advanceClock(state, 15000); // 3750 gün -> 3650 tavanı
     checkEndGameConditions(state);
     expect(state.phase).toBe('ended');
     expect(state.endReason).toBe('date_reached');

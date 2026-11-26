@@ -126,7 +126,7 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
     expect(playerWounded.length).toBeGreaterThan(0);
     expect(playerWounded[0].units['pistol:diamond']).toBeGreaterThan(0);
 
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 45; i++) {
       tickArmiesCombatAndShips(state, 1);
     }
     expect(state.wounded.filter((w) => w.countryId === pid).length).toBe(0);
@@ -161,14 +161,14 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
     army.y = ship.y + 0.2;
     expect(orderArmyEmbarkShip(state, army.id, ship.id).ok).toBe(true);
 
-    tickArmiesCombatAndShips(state, 2);
+    tickArmiesCombatAndShips(state, 3);
     expect(state.armies[army.id]).toBeUndefined();
     expect(getTotalSoldiers(ship.units)).toBe(250);
 
     // Gemi hedef kıyıya doğru yola çıkar -> zamanla ulaşır -> askerler karada belirir
     expect(orderShipSailToCoastalRegion(state, ship.id, destCoastReg.id).ok).toBe(true);
-    for (let i = 0; i < 30; i++) {
-      tickArmiesCombatAndShips(state, 1);
+    for (let i = 0; i < 60; i++) {
+      tickArmiesCombatAndShips(state, 2);
     }
 
     expect(getTotalSoldiers(ship.units)).toBe(0);

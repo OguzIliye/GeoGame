@@ -38,6 +38,8 @@ export interface BuildingSlot {
   constructing: boolean;
   progressSec: number;
   totalSec: number;
+  x?: number;
+  y?: number;
 }
 
 export interface TerrainProp {
@@ -139,6 +141,7 @@ export interface ArmyStack {
   units: Record<string, number>; // UnitTypeKey -> count (>0)
   targetX: number | null;
   targetY: number | null;
+  waypoints?: Point[];
   targetRegionId: string | null;
   targetArmyId: string | null;
   inCombatWithArmyId: string | null;
@@ -178,7 +181,24 @@ export interface ArenaBounds {
   maxY: number;
 }
 
-export type GamePhase = 'world_select' | 'playing' | 'ended';
+export type AutoPauseReason = 'building_placement' | 'move_order' | 'encounter' | 'tutorial';
+
+export interface EncounterPrompt {
+  id: string;
+  playerArmyId: string;
+  otherArmyId: string;
+  otherCountryId: string;
+  relation: RelationStatus;
+  activeTab: 'encounter' | 'diplomacy';
+}
+
+export interface FocusPing {
+  x: number;
+  y: number;
+  startedRealMs: number;
+}
+
+export type GamePhase = 'main_menu' | 'world_select' | 'playing' | 'ended';
 export type SpeedMultiplier = 0 | 0.5 | 1 | 2;
 
 export interface GameState {
@@ -186,7 +206,7 @@ export interface GameState {
   selectedWorldCountryId: string | null;
   hoveredWorldCountryId: string | null;
 
-  simDaysElapsed: number; // 0 = 2000-01-01, 7300 = 2020-01-01
+  simDaysElapsed: number; // 0 = 2000-01-01, 3650 = 2010-01-01
   simSecondsElapsed: number;
   speed: SpeedMultiplier;
   lastNonZeroSpeed: Exclude<SpeedMultiplier, 0>;
@@ -205,6 +225,16 @@ export interface GameState {
   selectedShipId: string | null;
   selectedRegionId: string | null;
   moveOrderMode: boolean; // True when an army or loaded ship is awaiting a map target click
+
+  placingBuildingType: Exclude<BuildingType, 'combined'> | null;
+  placementHoverPoint: Point | null;
+  autoPauseReasons: AutoPauseReason[];
+  activeEncounter: EncounterPrompt | null;
+  encounterCooldownUntilSimSec: Record<string, number>;
+  armyFocusIndex: number;
+  focusPing: FocusPing | null;
+  tutorialSeen: boolean;
+  tutorialPromptOpen: boolean;
 
   toasts: ImportantToast[];
   endReason: 'victory_domination' | 'date_reached' | 'defeat_eliminated' | null;

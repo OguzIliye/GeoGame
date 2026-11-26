@@ -2,9 +2,9 @@ import type { BuildingType, ShieldId, WeaponId } from '../types';
 
 export const CALENDAR = {
   START_YEAR: 2000,
-  END_YEAR: 2020,
-  TOTAL_DAYS: 20 * 365, // 7300 days
-  DAYS_PER_SIM_SECOND: 10, // 1x speed: ~12.1 minutes full campaign
+  END_YEAR: 2010,
+  TOTAL_DAYS: 10 * 365, // 3650 days -> ~4 hours at 1x (0.25 days/sec)
+  DAYS_PER_SIM_SECOND: 0.25, // 1 real second = 0.25 in-game days (4 sec = 1 day)
 } as const;
 
 export const ARENA_CONFIG = {
@@ -247,14 +247,17 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
 };
 
 export const COMBAT_CONFIG = {
-  LAND_MOVE_SPEED: 2.1, // Map units per sim second
-  SHIP_MOVE_SPEED: 2.75, // ~1.3x land speed
+  LAND_MOVE_SPEED: 0.45, // ~1 region (1.8 map units) per 4 sim sec (= 1 in-game day)
+  SHIP_MOVE_SPEED: 0.6, // ~1.33x land speed
   MERGE_DISTANCE: 0.95,
   COMBAT_ENGAGE_DISTANCE: 0.65,
+  ENCOUNTER_DETECT_DISTANCE: 1.05,
+  ENCOUNTER_COOLDOWN_SEC: 10,
+  LONG_MARCH_WEAVE_MIN_DIST: 2.2,
   COMBAT_TICK_SEC: 0.5,
   ESCAPE_TO_HOSPITAL_RATE: 0.3,
   HOSPITAL_HEAL_SEC: 8,
-  WOUNDED_TRAVEL_SPEED: 3.2,
+  WOUNDED_TRAVEL_SPEED: 0.9,
 } as const;
 
 export function computeCaptureDurationSec(totalSoldiers: number): number {

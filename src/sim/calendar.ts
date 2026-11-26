@@ -1,5 +1,5 @@
 import { CALENDAR } from '../config/balance';
-import type { GameState, SpeedMultiplier } from '../types';
+import type { AutoPauseReason, GameState, SpeedMultiplier } from '../types';
 
 const MONTHS_TR = [
   'Oca',
@@ -50,9 +50,36 @@ export function togglePauseSpace(state: GameState): void {
   }
 }
 
+export function setAutoPauseReason(
+  state: GameState,
+  reason: AutoPauseReason,
+  active: boolean,
+): void {
+  if (!state.autoPauseReasons) state.autoPauseReasons = [];
+  if (active) {
+    if (!state.autoPauseReasons.includes(reason)) {
+      state.autoPauseReasons.push(reason);
+    }
+  } else {
+    state.autoPauseReasons = state.autoPauseReasons.filter((r) => r !== reason);
+  }
+}
+
+export function clearAllAutoPauses(state: GameState): void {
+  state.autoPauseReasons = [];
+}
+
+export function isAutoPaused(state: GameState): boolean {
+  return (state.autoPauseReasons?.length ?? 0) > 0;
+}
+
+export function isEffectivelyPaused(state: GameState): boolean {
+  return state.speed === 0 || isAutoPaused(state);
+}
+
 /** Advance simulation clock by real-time delta, returning effective simulation seconds elapsed. */
 export function advanceClock(state: GameState, dtRealSec: number): number {
-  if (state.phase !== 'playing' || state.speed === 0) return 0;
+  if (state.phase !== 'playing' || isEffectivelyPaused(state)) return 0;
   const dtSimSec = dtRealSec * state.speed;
   state.simSecondsElapsed += dtSimSec;
   state.simDaysElapsed = Math.min(
