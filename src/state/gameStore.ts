@@ -23,8 +23,11 @@ export function createInitialGameState(): GameState {
     diplomacy: {},
     combatTickAccumulator: 0,
     selectedArmyId: null,
+    selectedArmyIds: [],
     selectedShipId: null,
     selectedRegionId: null,
+    activeBuildingRegionId: null,
+    boxSelectRect: null,
     moveOrderMode: false,
     placingBuildingType: null,
     placementHoverPoint: null,
@@ -65,8 +68,11 @@ export function startGameWithCountry(
   state.speed = 1;
   state.lastNonZeroSpeed = 1;
   state.selectedArmyId = null;
+  state.selectedArmyIds = [];
   state.selectedShipId = null;
   state.selectedRegionId = null;
+  state.activeBuildingRegionId = null;
+  state.boxSelectRect = null;
   state.moveOrderMode = false;
   state.placingBuildingType = null;
   state.placementHoverPoint = null;

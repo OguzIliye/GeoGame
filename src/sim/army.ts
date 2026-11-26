@@ -2,6 +2,7 @@ import {
   BUILDINGS,
   COMBAT_CONFIG,
   computeCaptureDurationSec,
+  ECONOMY,
   SHIELD_ORDER,
   SHIELDS,
   WEAPON_ORDER,
@@ -23,8 +24,10 @@ import { canArmyEnterCountryTerritory, declareWar, getRelationStatus } from './d
 import {
   getActiveBuildingLevel,
   getCountryRegions,
+  getEffectiveBuildingCount,
   getRegionBuildingPoint,
   nextUid,
+  pushFloatingEffect,
   pushImportantToast,
 } from './economy';
 
@@ -86,7 +89,46 @@ export function cancelSelectionAndOrderMode(state: GameState): void {
   state.moveOrderMode = false;
   setAutoPauseReason(state, 'move_order', false);
   state.selectedArmyId = null;
+  state.selectedArmyIds = [];
   state.selectedShipId = null;
+  state.boxSelectRect = null;
+}
+
+export function selectSingleArmy(state: GameState, armyId: string | null): void {
+  state.selectedArmyId = armyId;
+  state.selectedArmyIds = armyId ? [armyId] : [];
+  state.selectedShipId = null;
+}
+
+export function selectArmiesInWorldBox(
+  state: GameState,
+  countryId: string,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+): ArmyStack[] {
+  const minX = Math.min(x1, x2);
+  const maxX = Math.max(x1, x2);
+  const minY = Math.min(y1, y2);
+  const maxY = Math.max(y1, y2);
+
+  const hits = Object.values(state.armies)
+    .filter(
+      (a) =>
+        a.countryId === countryId &&
+        getTotalSoldiers(a.units) > 0 &&
+        a.x >= minX &&
+        a.x <= maxX &&
+        a.y >= minY &&
+        a.y <= maxY,
+    )
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  state.selectedShipId = null;
+  state.selectedArmyIds = hits.map((a) => a.id);
+  state.selectedArmyId = hits.length === 1 ? hits[0].id : null;
+  return hits;
 }
 
 export function pickArmyAtPoint(
@@ -159,8 +201,115 @@ export function mergeArmies(
   for (const [k, cnt] of Object.entries(b.units)) {
     if (cnt > 0) a.units[k] = (a.units[k] ?? 0) + cnt;
   }
+
+  // Re-point any third army that was walking to merge into `b` so it merges into `a`
+  for (const other of Object.values(state.armies)) {
+    if (other.mergeTargetArmyId === b.id && other.id !== a.id) {
+      other.mergeTargetArmyId = a.id;
+    }
+  }
+
+  if (state.selectedArmyIds) {
+    state.selectedArmyIds = state.selectedArmyIds.filter((id) => id !== b.id);
+    if (state.selectedArmyIds.length === 1) {
+      state.selectedArmyId = state.selectedArmyIds[0];
+    }
+  }
+  if (state.selectedArmyId === b.id) {
+    state.selectedArmyId = a.id;
+  }
+
   delete state.armies[b.id];
   return { ok: true };
+}
+
+/** Order one friendly army to walk to another friendly army and auto-merge upon contact (or merge immediately if close). */
+export function orderArmyMergeIntoTarget(
+  state: GameState,
+  sourceArmyId: string,
+  targetArmyId: string,
+): { ok: boolean; mergedImmediately?: boolean; targetArmyId?: string; error?: string } {
+  const src = state.armies[sourceArmyId];
+  const dst = state.armies[targetArmyId];
+  if (!src || !dst || src.id === dst.id) {
+    return { ok: false, error: 'Geçersiz birleştirme hedefi.' };
+  }
+  if (src.countryId !== dst.countryId) {
+    return { ok: false, error: 'Farklı ülkelerin orduları birleşemez.' };
+  }
+  if (src.inCombatWithArmyId || dst.inCombatWithArmyId) {
+    return { ok: false, error: 'Çatışmadaki ordu birleştirilemez.' };
+  }
+
+  if (Math.hypot(src.x - dst.x, src.y - dst.y) <= COMBAT_CONFIG.MERGE_DISTANCE) {
+    const m = mergeArmies(state, dst.id, src.id);
+    return { ok: m.ok, mergedImmediately: m.ok, targetArmyId: dst.id, error: m.error };
+  }
+
+  clearCaptureByArmy(state, src.id);
+  src.mergeTargetArmyId = dst.id;
+  src.targetArmyId = null;
+  src.targetRegionId = null;
+  src.embarkingShipId = null;
+  src.waypoints = [[dst.x, dst.y]];
+  src.targetX = dst.x;
+  src.targetY = dst.y;
+  return { ok: true, mergedImmediately: false, targetArmyId: dst.id };
+}
+
+/** Merge 2+ selected friendly armies: merges immediately if close, otherwise converges on common meeting point and auto-merges. */
+export function orderArmiesMerge(
+  state: GameState,
+  armyIds: string[],
+): { ok: boolean; anchorArmyId?: string; mergedImmediately?: boolean; error?: string } {
+  const uniqueIds = [...new Set(armyIds)];
+  const valid = uniqueIds
+    .map((id) => state.armies[id])
+    .filter((a): a is ArmyStack => Boolean(a && !a.inCombatWithArmyId && getTotalSoldiers(a.units) > 0));
+
+  if (valid.length < 2) {
+    return { ok: false, error: 'Birleştirmek için çatışmada olmayan en az 2 dost ordu seçin.' };
+  }
+
+  const cid = valid[0].countryId;
+  const sameCountry = valid.filter((a) => a.countryId === cid);
+  if (sameCountry.length < 2) {
+    return { ok: false, error: 'Seçili ordular aynı ülkeye ait olmalıdır.' };
+  }
+
+  const avgX = sameCountry.reduce((s, a) => s + a.x, 0) / sameCountry.length;
+  const avgY = sameCountry.reduce((s, a) => s + a.y, 0) / sameCountry.length;
+
+  // Pick central army as anchor
+  sameCountry.sort(
+    (a, b) => Math.hypot(a.x - avgX, a.y - avgY) - Math.hypot(b.x - avgX, b.y - avgY),
+  );
+  const anchor = sameCountry[0];
+
+  // Move anchor toward common meeting point if passable and not all already within merge range
+  const allNearAnchor = sameCountry.every(
+    (a) => Math.hypot(a.x - anchor.x, a.y - anchor.y) <= COMBAT_CONFIG.MERGE_DISTANCE,
+  );
+  if (!allNearAnchor) {
+    const midReg = pickRegionAtPoint([avgX, avgY], state.regions);
+    if (midReg && canArmyEnterCountryTerritory(state, cid, midReg.ownerId)) {
+      orderArmyMoveToRegion(state, anchor.id, midReg.id, [avgX, avgY]);
+    }
+  }
+
+  for (let i = 1; i < sameCountry.length; i++) {
+    orderArmyMergeIntoTarget(state, sameCountry[i].id, anchor.id);
+  }
+
+  const survivingIds = sameCountry.map((a) => a.id).filter((id) => Boolean(state.armies[id]));
+  state.selectedArmyIds = survivingIds;
+  state.selectedArmyId = survivingIds.length === 1 ? survivingIds[0] : null;
+
+  return {
+    ok: true,
+    anchorArmyId: anchor.id,
+    mergedImmediately: survivingIds.length === 1,
+  };
 }
 
 /**
@@ -210,10 +359,10 @@ export function splitArmyStack(
     }
   }
 
-  const offsetPt: Point = [army.x + 0.24, army.y + 0.16];
+  const offsetPt: Point = [army.x + 0.28, army.y + 0.18];
   const regAtOffset = pickRegionAtPoint(offsetPt, state.regions);
-  const spawnX = regAtOffset && regAtOffset.ownerId === army.countryId ? offsetPt[0] : army.x + 0.1;
-  const spawnY = regAtOffset && regAtOffset.ownerId === army.countryId ? offsetPt[1] : army.y + 0.08;
+  const spawnX = regAtOffset && regAtOffset.ownerId === army.countryId ? offsetPt[0] : army.x + 0.12;
+  const spawnY = regAtOffset && regAtOffset.ownerId === army.countryId ? offsetPt[1] : army.y + 0.1;
 
   const newArmy: ArmyStack = {
     id: nextUid('army'),
@@ -227,11 +376,47 @@ export function splitArmyStack(
     waypoints: [],
     targetRegionId: null,
     targetArmyId: null,
+    mergeTargetArmyId: null,
     inCombatWithArmyId: null,
     embarkingShipId: null,
   };
   state.armies[newArmy.id] = newArmy;
   return { ok: true, newArmy };
+}
+
+/** One-click 50/50 split (`✂️ Yarıya Böl (50/50)`) across all unit types in an army. */
+export function splitArmyHalf(
+  state: GameState,
+  armyId: string,
+): { ok: boolean; newArmy?: ArmyStack; error?: string } {
+  const army = state.armies[armyId];
+  if (!army) return { ok: false, error: 'Ordu kümesi bulunamadı.' };
+  if (army.inCombatWithArmyId) return { ok: false, error: 'Savaştaki küme ayrılamaz.' };
+
+  const entries = getNonZeroUnits(army.units);
+  const total = getTotalSoldiers(army.units);
+  if (total <= 1) return { ok: false, error: 'Yarıya bölmek için en az 2 asker olmalı.' };
+
+  const targetHalf = Math.floor(total / 2);
+  const splitCounts: Record<string, number> = {};
+  let assigned = 0;
+
+  for (const [key, cnt] of entries) {
+    const base = Math.floor(cnt / 2);
+    splitCounts[key] = base;
+    assigned += base;
+  }
+
+  // Distribute odd remainders up to targetHalf
+  for (const [key, cnt] of entries) {
+    if (assigned >= targetHalf) break;
+    if (cnt % 2 === 1 && splitCounts[key] < cnt) {
+      splitCounts[key] += 1;
+      assigned += 1;
+    }
+  }
+
+  return splitArmyStack(state, armyId, splitCounts);
 }
 
 function hashSeedSign(seed: string): number {
@@ -327,8 +512,44 @@ export function orderArmyMoveToRegion(
   army.targetY = wps[0][1];
   army.targetRegionId = reg.id;
   army.targetArmyId = null;
+  army.mergeTargetArmyId = null;
   army.embarkingShipId = null;
   return { ok: true };
+}
+
+export function orderMultipleArmiesMoveToRegion(
+  state: GameState,
+  armyIds: string[],
+  targetRegionId: string,
+  destPoint?: Point,
+): { ok: boolean; movedCount: number; error?: string } {
+  const reg = state.regions[targetRegionId];
+  if (!reg) return { ok: false, movedCount: 0, error: 'Geçersiz hedef bölge.' };
+
+  let movedCount = 0;
+  let lastError: string | undefined;
+  const baseDest: Point = destPoint ? [destPoint[0], destPoint[1]] : [reg.centroid[0], reg.centroid[1]];
+
+  armyIds.forEach((id, idx) => {
+    const a = state.armies[id];
+    if (!a || a.inCombatWithArmyId) return;
+    // Slight fan offset when 2+ armies march together so stacks remain visible unless merged
+    let pt: Point = baseDest;
+    if (armyIds.length > 1) {
+      const ang = (idx / armyIds.length) * Math.PI * 2;
+      const cand: Point = [baseDest[0] + Math.cos(ang) * 0.14, baseDest[1] + Math.sin(ang) * 0.14];
+      const candReg = pickRegionAtPoint(cand, state.regions);
+      if (candReg?.id === reg.id) pt = cand;
+    }
+    const res = orderArmyMoveToRegion(state, id, targetRegionId, pt);
+    if (res.ok) movedCount += 1;
+    else lastError = res.error;
+  });
+
+  if (movedCount === 0) {
+    return { ok: false, movedCount: 0, error: lastError ?? 'Hareket edebilecek ordu bulunamadı.' };
+  }
+  return { ok: true, movedCount };
 }
 
 export function orderArmyAttackEnemyArmy(
@@ -339,6 +560,7 @@ export function orderArmyAttackEnemyArmy(
   const army = state.armies[armyId];
   const enemy = state.armies[enemyArmyId];
   if (!army || !enemy) return { ok: false, error: 'Geçersiz hedef ordu.' };
+  if (army.inCombatWithArmyId) return { ok: false, error: 'Ordu zaten çatışmada.' };
   if (army.countryId === enemy.countryId) return { ok: false, error: 'Dost orduya saldırılamaz.' };
   if (getRelationStatus(state, army.countryId, enemy.countryId) !== 'war') {
     return { ok: false, error: 'Bu ülkeyle savaşta değilsiniz! Önce savaş ilan edin.' };
@@ -346,12 +568,117 @@ export function orderArmyAttackEnemyArmy(
 
   clearCaptureByArmy(state, army.id);
   army.targetArmyId = enemy.id;
+  army.mergeTargetArmyId = null;
   army.waypoints = [[enemy.x, enemy.y]];
   army.targetX = enemy.x;
   army.targetY = enemy.y;
   army.targetRegionId = enemy.currentRegionId;
   army.embarkingShipId = null;
   return { ok: true };
+}
+
+export function orderMultipleArmiesAttackEnemyArmy(
+  state: GameState,
+  armyIds: string[],
+  enemyArmyId: string,
+): { ok: boolean; count: number; error?: string } {
+  let count = 0;
+  let lastError: string | undefined;
+  for (const id of armyIds) {
+    const res = orderArmyAttackEnemyArmy(state, id, enemyArmyId);
+    if (res.ok) count += 1;
+    else lastError = res.error;
+  }
+  return count > 0
+    ? { ok: true, count }
+    : { ok: false, count: 0, error: lastError ?? 'Saldıracak uygun ordu bulunamadı.' };
+}
+
+/** Retreat from active combat (`🏃 Geri Çekil`): suffers 10% retreat loss penalty and retreats to nearest friendly region. */
+export function retreatFromCombat(
+  state: GameState,
+  armyId: string,
+): { ok: boolean; lostSoldiers?: number; retreatRegionId?: string; error?: string } {
+  const army = state.armies[armyId];
+  if (!army) return { ok: false, error: 'Ordu bulunamadı.' };
+  if (!army.inCombatWithArmyId) return { ok: false, error: 'Bu ordu şu an çatışmada değil.' };
+
+  const foe = state.armies[army.inCombatWithArmyId];
+  const foePos: Point = foe ? [foe.x, foe.y] : [army.x, army.y];
+
+  const totalBefore = getTotalSoldiers(army.units);
+  const penaltyLoss =
+    totalBefore > 1
+      ? Math.min(totalBefore - 1, Math.max(1, Math.round(totalBefore * COMBAT_CONFIG.RETREAT_LOSS_RATE)))
+      : 0;
+  if (penaltyLoss > 0) {
+    const lostUnits = takeCasualtiesFromUnits(army.units, penaltyLoss);
+    dispatchEscapedWoundedToHospital(state, army.countryId, [army.x, army.y], lostUnits);
+  }
+
+  // Detach from combat; keep remaining friendly reinforcements engaged if any
+  army.inCombatWithArmyId = null;
+  army.combatLossCarry = 0;
+
+  for (const other of Object.values(state.armies)) {
+    if (other.inCombatWithArmyId === army.id) {
+      const altFriendly = Object.values(state.armies).find(
+        (f) =>
+          f.id !== army.id &&
+          getTotalSoldiers(f.units) > 0 &&
+          f.inCombatWithArmyId !== null &&
+          getRelationStatus(state, f.countryId, other.countryId) === 'war' &&
+          Math.hypot(f.x - other.x, f.y - other.y) <= COMBAT_CONFIG.COMBAT_ENGAGE_DISTANCE * 1.25,
+      );
+      other.inCombatWithArmyId = altFriendly ? altFriendly.id : null;
+    }
+  }
+
+  // Choose nearest safe friendly region outside enemy engagement radius
+  const owned = getCountryRegions(state, army.countryId);
+  const safeOwned = owned.filter(
+    (r) =>
+      Math.hypot(r.centroid[0] - foePos[0], r.centroid[1] - foePos[1]) >
+      COMBAT_CONFIG.COMBAT_ENGAGE_DISTANCE + 0.45,
+  );
+  const pool = safeOwned.length > 0 ? safeOwned : owned;
+  pool.sort(
+    (a, b) =>
+      Math.hypot(a.centroid[0] - army.x, a.centroid[1] - army.y) -
+      Math.hypot(b.centroid[0] - army.x, b.centroid[1] - army.y),
+  );
+  const retreatReg = pool[0] ?? state.regions[army.currentRegionId];
+
+  // Step slightly outside engagement circle toward retreat destination + set brief retreat grace window
+  army.retreatingUntilSimSec = state.simSecondsElapsed + 4.0;
+  if (foe) {
+    state.encounterCooldownUntilSimSec[encounterPairKey(army.id, foe.id)] =
+      state.simSecondsElapsed + COMBAT_CONFIG.ENCOUNTER_COOLDOWN_SEC;
+  }
+
+  if (retreatReg) {
+    const dest: Point = [retreatReg.centroid[0], retreatReg.centroid[1]];
+    const dx = dest[0] - foePos[0];
+    const dy = dest[1] - foePos[1];
+    const d = Math.hypot(dx, dy);
+    const stepOut = COMBAT_CONFIG.COMBAT_ENGAGE_DISTANCE + 0.22;
+    if (d > 1e-4) {
+      const nudged: Point = [foePos[0] + (dx / d) * stepOut, foePos[1] + (dy / d) * stepOut];
+      const nudgedReg = pickRegionAtPoint(nudged, state.regions);
+      if (nudgedReg && canArmyEnterCountryTerritory(state, army.countryId, nudgedReg.ownerId)) {
+        army.x = nudged[0];
+        army.y = nudged[1];
+        army.currentRegionId = nudgedReg.id;
+      }
+    }
+    orderArmyMoveToRegion(state, army.id, retreatReg.id, dest);
+  }
+
+  return {
+    ok: true,
+    lostSoldiers: penaltyLoss,
+    retreatRegionId: retreatReg?.id,
+  };
 }
 
 /** Re-embark / embark rule: click soldier first, then click friendly transport ship. */
@@ -369,6 +696,7 @@ export function orderArmyEmbarkShip(
   clearCaptureByArmy(state, army.id);
   army.embarkingShipId = ship.id;
   army.targetArmyId = null;
+  army.mergeTargetArmyId = null;
   army.targetRegionId = null;
   army.waypoints = [[ship.x, ship.y]];
   army.targetX = ship.x;
@@ -440,11 +768,11 @@ export function cyclePlayerArmyFocus(
   const chosen = units[state.armyFocusIndex];
   state.focusPing = { x: chosen.x, y: chosen.y, startedRealMs: nowRealMs };
   if (chosen.kind === 'army') {
-    state.selectedArmyId = chosen.id;
-    state.selectedShipId = null;
+    selectSingleArmy(state, chosen.id);
   } else {
     state.selectedShipId = chosen.id;
     state.selectedArmyId = null;
+    state.selectedArmyIds = [];
   }
   return { ok: true, target: chosen };
 }
@@ -461,7 +789,11 @@ export function checkPlayerArmyEncounters(state: GameState): void {
 
   const allArmies = Object.values(state.armies);
   const myArmies = allArmies.filter(
-    (a) => a.countryId === pid && !a.inCombatWithArmyId && getTotalSoldiers(a.units) > 0,
+    (a) =>
+      a.countryId === pid &&
+      !a.inCombatWithArmyId &&
+      (a.retreatingUntilSimSec ?? 0) <= state.simSecondsElapsed &&
+      getTotalSoldiers(a.units) > 0,
   );
   const foreignArmies = allArmies.filter(
     (a) => a.countryId !== pid && !a.inCombatWithArmyId && getTotalSoldiers(a.units) > 0,
@@ -473,6 +805,14 @@ export function checkPlayerArmyEncounters(state: GameState): void {
       if (myArmy.targetArmyId === other.id) continue;
 
       const dist = Math.hypot(myArmy.x - other.x, myArmy.y - other.y);
+      const rel = getRelationStatus(state, pid, other.countryId);
+      if (
+        rel === 'war' &&
+        (dist <= COMBAT_CONFIG.COMBAT_ENGAGE_DISTANCE || other.targetArmyId === myArmy.id)
+      ) {
+        continue;
+      }
+
       const key = encounterPairKey(myArmy.id, other.id);
 
       // Reset sticky cooldown once the two stacks have separated comfortably
@@ -525,12 +865,13 @@ export function resolveEncounterChoice(
 
   if (choice === 'declare_war_attack') {
     if (getRelationStatus(state, myArmy.countryId, other.countryId) !== 'war') {
-      declareWar(state, myArmy.countryId, other.countryId);
+      const warRes = declareWar(state, myArmy.countryId, other.countryId);
+      if (!warRes.ok) return warRes;
     }
     state.encounterCooldownUntilSimSec[key] =
       state.simSecondsElapsed + COMBAT_CONFIG.ENCOUNTER_COOLDOWN_SEC;
     myArmy.inCombatWithArmyId = other.id;
-    other.inCombatWithArmyId = myArmy.id;
+    if (!other.inCombatWithArmyId) other.inCombatWithArmyId = myArmy.id;
     myArmy.targetX = null;
     myArmy.targetY = null;
     myArmy.waypoints = [];
@@ -549,7 +890,7 @@ export function resolveEncounterChoice(
     state.encounterCooldownUntilSimSec[key] =
       state.simSecondsElapsed + COMBAT_CONFIG.ENCOUNTER_COOLDOWN_SEC;
     myArmy.inCombatWithArmyId = other.id;
-    other.inCombatWithArmyId = myArmy.id;
+    if (!other.inCombatWithArmyId) other.inCombatWithArmyId = myArmy.id;
     myArmy.targetX = null;
     myArmy.targetY = null;
     myArmy.waypoints = [];
@@ -567,6 +908,7 @@ export function resolveEncounterChoice(
     myArmy.waypoints = [];
     myArmy.targetRegionId = null;
     myArmy.targetArmyId = null;
+    myArmy.mergeTargetArmyId = null;
     myArmy.embarkingShipId = null;
     if (other.targetArmyId === myArmy.id) {
       other.targetArmyId = null;
@@ -647,7 +989,29 @@ export function computeArmyAverageStats(units: Record<string, number>): {
   };
 }
 
-/** Apply casualties across unit types (lowest-tier front-line units take slightly more or proportional loss) and return exact lost unit map. */
+function computeCombinedForceStats(armies: ArmyStack[]): {
+  count: number;
+  avgDamage: number;
+  avgDefense: number;
+} {
+  let count = 0;
+  let dmgSum = 0;
+  let defSum = 0;
+  for (const a of armies) {
+    const st = computeArmyAverageStats(a.units);
+    count += st.count;
+    dmgSum += st.count * st.avgDamage;
+    defSum += st.count * st.avgDefense;
+  }
+  if (count <= 0) return { count: 0, avgDamage: 10, avgDefense: 0 };
+  return {
+    count,
+    avgDamage: dmgSum / count,
+    avgDefense: defSum / count,
+  };
+}
+
+/** Apply casualties across unit types (lowest-tier front-line units fall first) and return exact lost unit map. */
 function takeCasualtiesFromUnits(
   units: Record<string, number>,
   lossCount: number,
@@ -660,7 +1024,6 @@ function takeCasualtiesFromUnits(
   const actualLoss = Math.min(total, lossCount);
   let remainingToRemove = actualLoss;
 
-  // Sort weakest tier first so front-line fodder falls first and elite bazooka fallback rule shines naturally
   entries.sort((a, b) => {
     const pa = parseUnitKey(a[0]);
     const pb = parseUnitKey(b[0]);
@@ -681,7 +1044,6 @@ function takeCasualtiesFromUnits(
     }
   }
 
-  // Clean up any rounding remainder
   for (const [key] of getNonZeroUnits(units)) {
     if (remainingToRemove <= 0) break;
     const take = Math.min(units[key], remainingToRemove);
@@ -701,14 +1063,18 @@ function dispatchEscapedWoundedToHospital(
   lostUnits: Record<string, number>,
 ): void {
   const hospReg = findNearestHospitalRegion(state, countryId, origin);
-  // If country has no standing Hospital, escaped soldiers cannot be saved
-  if (!hospReg) return;
+  const holdOnFieldForTutorial =
+    !hospReg &&
+    Boolean(state.tutorialHoldWoundedWithoutHospital) &&
+    countryId === state.playerCountryId;
+
+  // In standard play, if country has no standing Hospital, escaped soldiers cannot be saved
+  if (!hospReg && !holdOnFieldForTutorial) return;
 
   const escapedUnits: Record<string, number> = {};
   let totalEscaped = 0;
   for (const [key, cnt] of Object.entries(lostUnits)) {
     if (cnt <= 0) continue;
-    // 30% escape rate; probabilistic rounding for small batches so even 1-3 losses have accurate 30% expectation
     const exact = cnt * COMBAT_CONFIG.ESCAPE_TO_HOSPITAL_RATE;
     const whole = Math.floor(exact);
     const frac = exact - whole;
@@ -720,13 +1086,42 @@ function dispatchEscapedWoundedToHospital(
   }
   if (totalEscaped <= 0) return;
 
-  const [hx, hy] = getRegionBuildingPoint(hospReg);
+  if (holdOnFieldForTutorial) {
+    // Coalesce into existing field-waiting wounded batch if close
+    const existingField = state.wounded.find(
+      (w) =>
+        w.countryId === countryId &&
+        w.waitingForHospital &&
+        Math.hypot(w.from[0] - origin[0], w.from[1] - origin[1]) < 0.8,
+    );
+    if (existingField) {
+      for (const [k, v] of Object.entries(escapedUnits)) {
+        existingField.units[k] = (existingField.units[k] ?? 0) + v;
+      }
+      return;
+    }
+    state.wounded.push({
+      id: nextUid('wnd'),
+      countryId,
+      units: escapedUnits,
+      from: [origin[0], origin[1]],
+      toRegionId: '',
+      to: [origin[0], origin[1]],
+      travelProgress: 0,
+      healElapsedSec: 0,
+      healRequiredSec: COMBAT_CONFIG.HOSPITAL_HEAL_SEC,
+      waitingForHospital: true,
+    });
+    return;
+  }
+
+  const [hx, hy] = getRegionBuildingPoint(hospReg!);
   state.wounded.push({
     id: nextUid('wnd'),
     countryId,
     units: escapedUnits,
     from: [origin[0], origin[1]],
-    toRegionId: hospReg.id,
+    toRegionId: hospReg!.id,
     to: [hx, hy],
     travelProgress: 0,
     healElapsedSec: 0,
@@ -741,11 +1136,26 @@ function handleRegionCaptured(state: GameState, reg: Region, newOwnerId: string)
     return;
   }
 
-  const hadBuilding = reg.building ? BUILDINGS[reg.building.type].name : null;
+  const destroyedType = reg.building?.type ?? null;
+  const hadBuilding = destroyedType ? BUILDINGS[destroyedType].name : null;
   reg.ownerId = newOwnerId;
-  // DESIGN.md rule: When a region falls, any building inside it is DESTROYED!
+  // v1.2 Rule: Enemy building in captured region is DESTROYED, freeing the region for new construction!
   reg.building = null;
   reg.capture = null;
+
+  if (
+    destroyedType === 'university' &&
+    state.countries[prevOwnerId] &&
+    getEffectiveBuildingCount(state, prevOwnerId, 'university') <= 0
+  ) {
+    state.countries[prevOwnerId].activeResearch = null;
+  }
+
+  // v1.2 Rule: Instant +1.000 💰 region capture loot bonus to winner!
+  const winner = state.countries[newOwnerId];
+  if (winner) {
+    winner.money += ECONOMY.REGION_CAPTURE_BONUS;
+  }
 
   // Remove empty port ships tied to destroyed port region
   for (const ship of Object.values(state.ships)) {
@@ -758,9 +1168,17 @@ function handleRegionCaptured(state: GameState, reg: Region, newOwnerId: string)
   const atkName = state.countries[newOwnerId]?.name ?? newOwnerId;
   const defName = state.countries[prevOwnerId]?.name ?? prevOwnerId;
   if (newOwnerId === pid) {
+    pushFloatingEffect(state, {
+      text: `+${ECONOMY.REGION_CAPTURE_BONUS} 💰`,
+      color: '#facc15',
+      scope: 'world',
+      x: reg.centroid[0],
+      y: reg.centroid[1],
+      durationMs: 1800,
+    });
     pushImportantToast(
       state,
-      `🏴 Bölge Ele Geçirildi: ${defName} (${reg.id})${hadBuilding ? ` — ${hadBuilding} yıkıldı!` : ''}`,
+      `🏴 Bölge Ele Geçirildi (+${ECONOMY.REGION_CAPTURE_BONUS}💰): ${defName} (${reg.id})${hadBuilding ? ` — ${hadBuilding} yıkıldı!` : ''}`,
       'capture',
     );
   } else if (prevOwnerId === pid) {
@@ -778,7 +1196,6 @@ function handleRegionCaptured(state: GameState, reg: Region, newOwnerId: string)
     eliminatedCountry.eliminated = true;
     eliminatedCountry.activeResearch = null;
 
-    // Remove eliminated country's remaining armies/ships/wounded
     for (const a of Object.values(state.armies)) {
       if (a.countryId === prevOwnerId) delete state.armies[a.id];
     }
@@ -803,7 +1220,35 @@ function handleRegionCaptured(state: GameState, reg: Region, newOwnerId: string)
   }
 }
 
-/** Advance army movement, ship sailing/landing/embarking, combats, hospital recovery, and region captures. */
+function distributeSideCasualties(
+  state: GameState,
+  sideArmies: ArmyStack[],
+  rawTotalLoss: number,
+): void {
+  const totalSoldiers = sideArmies.reduce((s, a) => s + getTotalSoldiers(a.units), 0);
+  if (totalSoldiers <= 0 || rawTotalLoss <= 0) return;
+
+  for (const a of sideArmies) {
+    const cnt = getTotalSoldiers(a.units);
+    if (cnt <= 0) continue;
+    const share = rawTotalLoss * (cnt / totalSoldiers);
+    const acc = (a.combatLossCarry ?? 0) + share;
+    let whole = Math.floor(acc);
+    // Ensure steady progress even in tiny 1v1 skirmishes when accumulated >= 0.55
+    if (whole === 0 && acc >= 0.55) {
+      whole = 1;
+      a.combatLossCarry = 0;
+    } else {
+      a.combatLossCarry = acc - whole;
+    }
+    if (whole > 0) {
+      const lostUnits = takeCasualtiesFromUnits(a.units, whole);
+      dispatchEscapedWoundedToHospital(state, a.countryId, [a.x, a.y], lostUnits);
+    }
+  }
+}
+
+/** Advance army movement, walking merges, ship sailing/landing/embarking, multi-army reinforcement combats (+10% homeland defense), hospital recovery, and region captures. */
 export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): void {
   if (dtSimSec <= 0 || state.phase !== 'playing') return;
 
@@ -835,6 +1280,7 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
               waypoints: [],
               targetRegionId: null,
               targetArmyId: null,
+              mergeTargetArmyId: null,
               inCombatWithArmyId: null,
               embarkingShipId: null,
             };
@@ -850,8 +1296,9 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
     }
   }
 
-  // 2. Move Army Stacks (chasing enemy army, walking to ship, or walking along natural weave waypoints)
+  // 2. Move Army Stacks (walking merge, chasing enemy army, walking to ship, or natural weave waypoints)
   for (const army of Object.values(state.armies)) {
+    if (!state.armies[army.id]) continue;
     if (getTotalSoldiers(army.units) <= 0) {
       delete state.armies[army.id];
       continue;
@@ -869,6 +1316,31 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
         army.inCombatWithArmyId = null;
       } else {
         continue; // Locked in combat
+      }
+    }
+
+    // Track friendly merge target if ordered to merge on foot
+    if (army.mergeTargetArmyId) {
+      const mergeTarget = state.armies[army.mergeTargetArmyId];
+      if (
+        !mergeTarget ||
+        mergeTarget.id === army.id ||
+        mergeTarget.countryId !== army.countryId ||
+        mergeTarget.inCombatWithArmyId
+      ) {
+        army.mergeTargetArmyId = null;
+        army.targetX = null;
+        army.targetY = null;
+        army.waypoints = [];
+      } else if (
+        Math.hypot(army.x - mergeTarget.x, army.y - mergeTarget.y) <= COMBAT_CONFIG.MERGE_DISTANCE
+      ) {
+        mergeArmies(state, mergeTarget.id, army.id);
+        continue;
+      } else {
+        army.targetX = mergeTarget.x;
+        army.targetY = mergeTarget.y;
+        army.waypoints = [[mergeTarget.x, mergeTarget.y]];
       }
     }
 
@@ -912,12 +1384,12 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
           army.waypoints.shift();
         }
 
-        // Advance to next weave waypoint if more remain (intermediate regions are NOT captured!)
         if (
           army.waypoints &&
           army.waypoints.length > 0 &&
           !army.embarkingShipId &&
-          !army.targetArmyId
+          !army.targetArmyId &&
+          !army.mergeTargetArmyId
         ) {
           army.targetX = army.waypoints[0][0];
           army.targetY = army.waypoints[0][1];
@@ -930,6 +1402,18 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
         army.targetY = null;
         army.waypoints = [];
 
+        if (army.mergeTargetArmyId) {
+          const mergeTarget = state.armies[army.mergeTargetArmyId];
+          if (
+            mergeTarget &&
+            Math.hypot(army.x - mergeTarget.x, army.y - mergeTarget.y) <=
+              COMBAT_CONFIG.MERGE_DISTANCE
+          ) {
+            mergeArmies(state, mergeTarget.id, army.id);
+            continue;
+          }
+        }
+
         if (army.embarkingShipId) {
           const ship = state.ships[army.embarkingShipId];
           if (ship) {
@@ -937,6 +1421,7 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
               if (cnt > 0) ship.units[k] = (ship.units[k] ?? 0) + cnt;
             }
             if (state.selectedArmyId === army.id) state.selectedArmyId = null;
+            state.selectedArmyIds = (state.selectedArmyIds ?? []).filter((id) => id !== army.id);
             delete state.armies[army.id];
             continue;
           }
@@ -957,18 +1442,30 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
         army.y += (dy / dist) * step;
         const under = pickRegionAtPoint([army.x, army.y], state.regions);
         if (under) army.currentRegionId = under.id;
+
+        // Check mid-step auto-merge when walking to mergeTargetArmyId
+        if (army.mergeTargetArmyId) {
+          const mergeTarget = state.armies[army.mergeTargetArmyId];
+          if (
+            mergeTarget &&
+            !mergeTarget.inCombatWithArmyId &&
+            Math.hypot(army.x - mergeTarget.x, army.y - mergeTarget.y) <=
+              COMBAT_CONFIG.MERGE_DISTANCE
+          ) {
+            mergeArmies(state, mergeTarget.id, army.id);
+            continue;
+          }
+        }
       }
     }
   }
 
-  // 2.5 Check if any Player army encountered a foreign state's army -> auto-pause & prompt!
-  checkPlayerArmyEncounters(state);
-
-  // 3. Detect & lock opposing war armies within engagement range
+  // 3. Detect & lock opposing war armies within engagement range (including multi-army REINFORCEMENTS!)
   const armyList = Object.values(state.armies);
   for (let i = 0; i < armyList.length; i++) {
     const a = armyList[i];
     if (a.inCombatWithArmyId) continue;
+    if ((a.retreatingUntilSimSec ?? 0) > state.simSecondsElapsed) continue;
     if (
       state.activeEncounter &&
       (state.activeEncounter.playerArmyId === a.id ||
@@ -976,9 +1473,12 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
     ) {
       continue;
     }
-    for (let j = i + 1; j < armyList.length; j++) {
+
+    for (let j = 0; j < armyList.length; j++) {
+      if (i === j) continue;
       const b = armyList[j];
-      if (b.inCombatWithArmyId || a.countryId === b.countryId) continue;
+      if (a.countryId === b.countryId) continue;
+      if ((b.retreatingUntilSimSec ?? 0) > state.simSecondsElapsed) continue;
       if (
         state.activeEncounter &&
         (state.activeEncounter.playerArmyId === b.id ||
@@ -989,43 +1489,90 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
       if (getRelationStatus(state, a.countryId, b.countryId) !== 'war') continue;
       if (Math.hypot(a.x - b.x, a.y - b.y) <= COMBAT_CONFIG.COMBAT_ENGAGE_DISTANCE) {
         a.inCombatWithArmyId = b.id;
-        b.inCombatWithArmyId = a.id;
         a.targetX = null;
         a.targetY = null;
         a.targetArmyId = null;
+        a.mergeTargetArmyId = null;
         a.waypoints = [];
-        b.targetX = null;
-        b.targetY = null;
-        b.targetArmyId = null;
-        b.waypoints = [];
         clearCaptureByArmy(state, a.id);
-        clearCaptureByArmy(state, b.id);
+
+        if (!b.inCombatWithArmyId) {
+          b.inCombatWithArmyId = a.id;
+          b.targetX = null;
+          b.targetY = null;
+          b.targetArmyId = null;
+          b.mergeTargetArmyId = null;
+          b.waypoints = [];
+          clearCaptureByArmy(state, b.id);
+        }
         break;
       }
     }
   }
 
-  // 4. Process combat ticks (every 0.5s)
+  // 3.5 Check if any remaining non-fighting Player army encountered a foreign state's army -> auto-pause & prompt!
+  checkPlayerArmyEncounters(state);
+
+  // 4. Process multi-army combat ticks (every 0.5s) with reinforcement combined force & +10% Homeland Defense!
   state.combatTickAccumulator += dtSimSec;
   while (state.combatTickAccumulator >= COMBAT_CONFIG.COMBAT_TICK_SEC) {
     state.combatTickAccumulator -= COMBAT_CONFIG.COMBAT_TICK_SEC;
-    const processed = new Set<string>();
+    const visited = new Set<string>();
 
-    for (const a of Object.values(state.armies)) {
-      if (!a.inCombatWithArmyId || processed.has(a.id)) continue;
-      const b = state.armies[a.inCombatWithArmyId];
-      if (!b) {
-        a.inCombatWithArmyId = null;
+    for (const seed of Object.values(state.armies)) {
+      if (!seed.inCombatWithArmyId || visited.has(seed.id)) continue;
+
+      // Gather connected battle cluster
+      const cluster: ArmyStack[] = [];
+      const queue: ArmyStack[] = [seed];
+      visited.add(seed.id);
+
+      while (queue.length > 0) {
+        const cur = queue.shift()!;
+        cluster.push(cur);
+        for (const other of Object.values(state.armies)) {
+          if (visited.has(other.id) || !other.inCombatWithArmyId) continue;
+          if (
+            cur.inCombatWithArmyId === other.id ||
+            other.inCombatWithArmyId === cur.id ||
+            (Math.hypot(cur.x - other.x, cur.y - other.y) <=
+              COMBAT_CONFIG.COMBAT_ENGAGE_DISTANCE * 1.2 &&
+              getRelationStatus(state, cur.countryId, other.countryId) === 'war')
+          ) {
+            visited.add(other.id);
+            queue.push(other);
+          }
+        }
+      }
+
+      const sideA: ArmyStack[] = [];
+      const sideB: ArmyStack[] = [];
+      for (const member of cluster) {
+        if (
+          member.countryId === seed.countryId ||
+          getRelationStatus(state, member.countryId, seed.countryId) === 'allied'
+        ) {
+          sideA.push(member);
+        } else if (getRelationStatus(state, member.countryId, seed.countryId) === 'war') {
+          sideB.push(member);
+        }
+      }
+
+      if (sideA.length === 0 || sideB.length === 0) {
+        for (const m of cluster) {
+          m.inCombatWithArmyId = null;
+          m.combatLossCarry = 0;
+        }
         continue;
       }
-      processed.add(a.id);
-      processed.add(b.id);
 
-      const stA = computeArmyAverageStats(a.units);
-      const stB = computeArmyAverageStats(b.units);
+      const stA = computeCombinedForceStats(sideA);
+      const stB = computeCombinedForceStats(sideB);
       if (stA.count <= 0 || stB.count <= 0) {
-        a.inCombatWithArmyId = null;
-        b.inCombatWithArmyId = null;
+        for (const m of cluster) {
+          m.inCombatWithArmyId = null;
+          m.combatLossCarry = 0;
+        }
         continue;
       }
 
@@ -1035,33 +1582,87 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
       const effAtkA = stA.count * stA.avgDamage * numMultA * COMBAT_CONFIG.COMBAT_TICK_SEC;
       const effAtkB = stB.count * stB.avgDamage * numMultB * COMBAT_CONFIG.COMBAT_TICK_SEC;
 
-      const lossOnB = Math.max(1, Math.round(effAtkA / (30 + stB.avgDefense * 2)));
-      const lossOnA = Math.max(1, Math.round(effAtkB / (30 + stA.avgDefense * 2)));
+      // +10% Homeland Defense Bonus (`HOME_DEFENSE_BONUS`) when fighting on own territory!
+      const sideACountries = new Set(sideA.map((a) => a.countryId));
+      const sideBCountries = new Set(sideB.map((b) => b.countryId));
+      const homeA = sideA.some((a) => {
+        const reg = state.regions[a.currentRegionId] ?? pickRegionAtPoint([a.x, a.y], state.regions);
+        return Boolean(reg && sideACountries.has(reg.ownerId));
+      });
+      const homeB = sideB.some((b) => {
+        const reg = state.regions[b.currentRegionId] ?? pickRegionAtPoint([b.x, b.y], state.regions);
+        return Boolean(reg && sideBCountries.has(reg.ownerId));
+      });
 
-      const lostB = takeCasualtiesFromUnits(b.units, lossOnB);
-      const lostA = takeCasualtiesFromUnits(a.units, lossOnA);
+      const defDenomA =
+        (30 + stA.avgDefense * 2) * (homeA ? 1 + COMBAT_CONFIG.HOME_DEFENSE_BONUS : 1);
+      const defDenomB =
+        (30 + stB.avgDefense * 2) * (homeB ? 1 + COMBAT_CONFIG.HOME_DEFENSE_BONUS : 1);
 
-      dispatchEscapedWoundedToHospital(state, b.countryId, [b.x, b.y], lostB);
-      dispatchEscapedWoundedToHospital(state, a.countryId, [a.x, a.y], lostA);
+      const rawLossOnB = effAtkA / defDenomB;
+      const rawLossOnA = effAtkB / defDenomA;
 
-      if (getTotalSoldiers(a.units) <= 0) {
-        if (state.selectedArmyId === a.id) state.selectedArmyId = null;
-        delete state.armies[a.id];
-        b.inCombatWithArmyId = null;
-      }
-      if (getTotalSoldiers(b.units) <= 0) {
-        if (state.selectedArmyId === b.id) state.selectedArmyId = null;
-        delete state.armies[b.id];
-        if (state.armies[a.id]) a.inCombatWithArmyId = null;
+      distributeSideCasualties(state, sideB, rawLossOnB);
+      distributeSideCasualties(state, sideA, rawLossOnA);
+
+      // Remove wiped armies & maintain combat links among survivors
+      const aliveA = sideA.filter((a) => {
+        if (getTotalSoldiers(a.units) <= 0) {
+          if (state.selectedArmyId === a.id) state.selectedArmyId = null;
+          state.selectedArmyIds = (state.selectedArmyIds ?? []).filter((id) => id !== a.id);
+          delete state.armies[a.id];
+          return false;
+        }
+        return true;
+      });
+      const aliveB = sideB.filter((b) => {
+        if (getTotalSoldiers(b.units) <= 0) {
+          if (state.selectedArmyId === b.id) state.selectedArmyId = null;
+          state.selectedArmyIds = (state.selectedArmyIds ?? []).filter((id) => id !== b.id);
+          delete state.armies[b.id];
+          return false;
+        }
+        return true;
+      });
+
+      if (aliveA.length === 0 || aliveB.length === 0) {
+        for (const m of [...aliveA, ...aliveB]) {
+          m.inCombatWithArmyId = null;
+          m.combatLossCarry = 0;
+        }
+      } else {
+        for (const a of aliveA) {
+          if (!a.inCombatWithArmyId || !state.armies[a.inCombatWithArmyId]) {
+            a.inCombatWithArmyId = aliveB[0].id;
+          }
+        }
+        for (const b of aliveB) {
+          if (!b.inCombatWithArmyId || !state.armies[b.inCombatWithArmyId]) {
+            b.inCombatWithArmyId = aliveA[0].id;
+          }
+        }
       }
     }
   }
 
-  // 5. Process Wounded Batches walking automatically to Hospital & healing back into original unit types
+  // 5. Process Wounded Batches (field-waiting in tutorial or walking to Hospital & healing back into original unit types)
   const remainingWounded = [];
   for (const w of state.wounded) {
+    if (w.waitingForHospital) {
+      const newlyBuiltHosp = findNearestHospitalRegion(state, w.countryId, w.from);
+      if (newlyBuiltHosp) {
+        const [hx, hy] = getRegionBuildingPoint(newlyBuiltHosp);
+        w.waitingForHospital = false;
+        w.toRegionId = newlyBuiltHosp.id;
+        w.to = [hx, hy];
+        w.travelProgress = 0;
+      } else {
+        remainingWounded.push(w);
+        continue;
+      }
+    }
+
     const hospReg = state.regions[w.toRegionId];
-    // If hospital region was lost or building destroyed before healing completed, try rerouting to another hospital
     if (
       !hospReg ||
       hospReg.ownerId !== w.countryId ||
@@ -1074,7 +1675,7 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
         w.from[1] + (w.to[1] - w.from[1]) * w.travelProgress,
       ];
       const alt = findNearestHospitalRegion(state, w.countryId, curPos);
-      if (!alt) continue; // Lost — no standing hospital left!
+      if (!alt) continue;
       const [ax, ay] = getRegionBuildingPoint(alt);
       w.from = curPos;
       w.toRegionId = alt.id;
@@ -1084,15 +1685,18 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
 
     if (w.travelProgress < 1) {
       const dist = Math.max(0.2, Math.hypot(w.to[0] - w.from[0], w.to[1] - w.from[1]));
-      w.travelProgress = Math.min(1, w.travelProgress + (COMBAT_CONFIG.WOUNDED_TRAVEL_SPEED * dtSimSec) / dist);
+      w.travelProgress = Math.min(
+        1,
+        w.travelProgress + (COMBAT_CONFIG.WOUNDED_TRAVEL_SPEED * dtSimSec) / dist,
+      );
       remainingWounded.push(w);
     } else {
       w.healElapsedSec += dtSimSec;
       if (w.healElapsedSec >= w.healRequiredSec) {
-        // Healed soldiers return with their EXACT original unit/equipment types!
         const targetReg = state.regions[w.toRegionId];
         if (targetReg) {
           const [rx, ry] = getRegionBuildingPoint(targetReg);
+          const healedTotal = getTotalSoldiers(w.units);
           const existing = Object.values(state.armies).find(
             (a) =>
               a.countryId === w.countryId &&
@@ -1117,10 +1721,23 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
               waypoints: [],
               targetRegionId: null,
               targetArmyId: null,
+              mergeTargetArmyId: null,
               inCombatWithArmyId: null,
               embarkingShipId: null,
             };
             state.armies[recovered.id] = recovered;
+          }
+
+          if (w.countryId === state.playerCountryId && healedTotal > 0) {
+            pushFloatingEffect(state, {
+              text: `+${healedTotal} İyileşti!`,
+              color: '#4ade80',
+              scope: 'world',
+              x: rx,
+              y: ry,
+              count: healedTotal,
+              durationMs: 1800,
+            });
           }
         }
       } else {
@@ -1132,7 +1749,6 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
 
   // 6. Process timed Region Captures
   for (const reg of Object.values(state.regions)) {
-    // Find stationary, non-fighting war armies inside this region
     const invaders = Object.values(state.armies).filter(
       (a) =>
         a.currentRegionId === reg.id &&

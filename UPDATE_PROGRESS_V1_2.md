@@ -3,8 +3,8 @@
 > Bu dosya [UPDATE_DESIGN_V1_2.md](UPDATE_DESIGN_V1_2.md) kapsamındaki tüm v1.2 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik Vitest testleri + temiz `tsc --noEmit && vite build` + `UPDATE_PROGRESS_V1_2.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 3 — Taktiksel Savaş, 7 Aksiyonlu Diplomasi, RTS Çoklu Ordu / Birleştirme & 3 Slotlu Save/Continue Motoru
-- **Tamamlanan Aşamalar:** 2 / 5
+- **Aktif Aşama:** Aşama 4 — RTS Kontrolleri (Kutu Seçimi + `WASD`/Sağ-Tık Pan), Evrensel Highlight, Sade HUD (`🏪 Mağaza`), İkon/Ayırıcı Çizgili Tüm Bina Popupları, 2 Sayfalı Diplomasi & 3 Slotlu Save/Continue UI
+- **Tamamlanan Aşamalar:** 3 / 5
 - **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -30,12 +30,12 @@
 ---
 
 ## Aşama 3 — Taktiksel Savaş, 7 Aksiyonlu Diplomasi, RTS Çoklu Ordu / Birleştirme & 3 Slotlu Save/Continue Motoru
-- [ ] Bölge fethinde düşman binasının yıkılması + anında `+1.000 💰` ganimet ödülü
-- [ ] Savaş taktikleri: kendi toprağında `+%10` Vatan Savunması, çatışmaya dost ordu takviyesi, çatışmadan `🏃 Geri Çekil` (`%10` kayıp cezasıyla en yakın dost bölgeye), tek tık `splitArmyHalf` (`50/50`)
-- [ ] Çoklu ordu seçimi (`selectedArmyIds`), yürüyerek birleştirme (`mergeTargetArmyId` / `orderArmiesMerge`), tek dost orduya tıklayıp birleştirme ve toplu yürüyüş
-- [ ] 7 aksiyonlu Diplomasi motoru (`sendDiplomaticGift`, `proposeNonAggressionPact` 365 gün, `breakAlliance`, `proposeTradeAgreement` `+%10 / 5sn` ve savaşta iptal) + `KeyD → KeyP` kısayol uyarlaması (`WASD` kamera kaydırma için)
-- [ ] 3 slotlu `src/state/saveManager.ts` (`saveToSlot / loadFromSlot / deleteSlot / listSaveSlots`, ülke adı + oyun tarihi metadatası + kompakt serileştirme)
-- [ ] Aşama 3 otomatik testler + temiz build + `UPDATE_PROGRESS_V1_2.md` güncellemesi + git commit
+- [x] Bölge fethinde düşman binasının yıkılması + anında `+1.000 💰` ganimet ödülü
+- [x] Savaş taktikleri: kendi toprağında `+%10` Vatan Savunması, çatışmaya dost ordu takviyesi, çatışmadan `🏃 Geri Çekil` (`%10` kayıp cezasıyla en yakın dost bölgeye), tek tık `splitArmyHalf` (`50/50`)
+- [x] Çoklu ordu seçimi (`selectedArmyIds`), yürüyerek birleştirme (`mergeTargetArmyId` / `orderArmiesMerge`), tek dost orduya tıklayıp birleştirme ve toplu yürüyüş
+- [x] 7 aksiyonlu Diplomasi motoru (`sendDiplomaticGift`, `proposeNonAggressionPact` 365 gün, `breakAlliance`, `proposeTradeAgreement` `+%10 / 5sn` ve savaşta iptal) + `KeyD → KeyP` kısayol uyarlaması (`WASD` kamera kaydırma için)
+- [x] 3 slotlu `src/state/saveManager.ts` (`saveToSlot / loadFromSlot / deleteSlot / listSaveSlots`, ülke adı + oyun tarihi metadatası + kompakt serileştirme)
+- [x] Aşama 3 otomatik testler + temiz build + `UPDATE_PROGRESS_V1_2.md` güncellemesi + git commit
 
 ---
 

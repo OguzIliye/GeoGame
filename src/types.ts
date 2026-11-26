@@ -107,6 +107,7 @@ export interface WoundedBatch {
   travelProgress: number; // 0..1 walking to hospital
   healElapsedSec: number;
   healRequiredSec: number;
+  waitingForHospital?: boolean;
 }
 
 export interface Country {
@@ -144,8 +145,11 @@ export interface ArmyStack {
   waypoints?: Point[];
   targetRegionId: string | null;
   targetArmyId: string | null;
+  mergeTargetArmyId?: string | null;
   inCombatWithArmyId: string | null;
   embarkingShipId: string | null;
+  retreatingUntilSimSec?: number;
+  combatLossCarry?: number;
 }
 
 export interface TransportShip {
@@ -165,6 +169,9 @@ export interface DiplomacyEdge {
   b: string;
   status: RelationStatus;
   score: number; // -100..+100
+  nonAggressionUntilDay?: number;
+  tradeAgreement?: boolean;
+  lastGiftDayByCountry?: Record<string, number>;
 }
 
 export interface ImportantToast {
@@ -181,7 +188,14 @@ export interface ArenaBounds {
   maxY: number;
 }
 
-export type AutoPauseReason = 'building_placement' | 'move_order' | 'encounter' | 'tutorial';
+export type AutoPauseReason =
+  | 'building_placement'
+  | 'move_order'
+  | 'encounter'
+  | 'tutorial'
+  | 'building_popup'
+  | 'tutorial_spotlight'
+  | 'save_exit';
 
 export interface EncounterPrompt {
   id: string;
@@ -210,6 +224,13 @@ export interface FloatingEffect {
   durationMs: number;
 }
 
+export interface BoxSelectRect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
 export type GamePhase = 'main_menu' | 'world_select' | 'playing' | 'ended';
 export type SpeedMultiplier = 0 | 0.5 | 1 | 2;
 
@@ -234,8 +255,11 @@ export interface GameState {
   combatTickAccumulator: number;
 
   selectedArmyId: string | null;
+  selectedArmyIds: string[];
   selectedShipId: string | null;
   selectedRegionId: string | null;
+  activeBuildingRegionId?: string | null;
+  boxSelectRect?: BoxSelectRect | null;
   moveOrderMode: boolean; // True when an army or loaded ship is awaiting a map target click
 
   placingBuildingType: BuildingType | null;
@@ -247,6 +271,7 @@ export interface GameState {
   focusPing: FocusPing | null;
   tutorialSeen: boolean;
   tutorialPromptOpen: boolean;
+  tutorialHoldWoundedWithoutHospital?: boolean;
 
   floatingEffects: FloatingEffect[];
   toasts: ImportantToast[];

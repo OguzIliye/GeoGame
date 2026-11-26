@@ -24,16 +24,16 @@ export const KEY_ACTION_SPECS: KeyActionSpec[] = [
   { id: 'speedNormal', label: 'Zaman Hızı 1x', defaultCode: 'Digit2' },
   { id: 'speedFast', label: 'Zaman Hızı 2x', defaultCode: 'Digit3' },
   { id: 'cycleArmy', label: 'Sıradaki Orduya Zoomla', defaultCode: 'KeyQ' },
-  { id: 'openBuildings', label: 'Binalar Penceresi', defaultCode: 'KeyB' },
+  { id: 'openBuildings', label: 'Mağaza Penceresi', defaultCode: 'KeyB' },
   { id: 'openFactory', label: 'Fabrika Penceresi', defaultCode: 'KeyF' },
   { id: 'openBarracks', label: 'Kışla Penceresi', defaultCode: 'KeyK' },
   { id: 'openScience', label: 'Bilim Ağacı Penceresi', defaultCode: 'KeyT' },
-  { id: 'openDiplomacy', label: 'Diplomasi Penceresi', defaultCode: 'KeyD' },
+  { id: 'openDiplomacy', label: 'Diplomasi Penceresi', defaultCode: 'KeyP' },
   { id: 'openSettings', label: 'Ayarlar Penceresi', defaultCode: 'KeyO' },
   { id: 'openTutorial', label: 'Nasıl Oynanır (Tutorial)', defaultCode: 'KeyH' },
 ];
 
-const STORAGE_KEY = 'pixelworld_keybindings_v1';
+const STORAGE_KEY = 'pixelworld_keybindings_v1_2';
 
 const FORBIDDEN_CODES = new Set([
   'Escape', // Explicitly forbidden by DESIGN.md (web fullscreen conflict)
