@@ -3,8 +3,8 @@
 > Bu dosya [UPDATE_DESIGN.md](UPDATE_DESIGN.md) kapsamındaki tüm v1.1 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik test + temiz build + `UPDATE_PROGRESS.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 2 — Doğal Uzun Mesafe Yürüyüşü, Hedef Fethi, Karşılaşma (Encounter) Sistemi & Ordu Odaklanma (`Q`)
-- **Tamamlanan Aşamalar:** 1 / 4
+- **Aktif Aşama:** Aşama 3 — Genişletilmiş Detaylı Pixel Art, Ülke Rengi Outline, World-Space Zoom & İkon Üreticisi
+- **Tamamlanan Aşamalar:** 2 / 4
 - **Son Doğrulama (Test + Clean Build + Tarayıcı Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -20,11 +20,11 @@
 ---
 
 ## Aşama 2 — Doğal Uzun Mesafe Yürüyüşü, Hedef Fethi, Karşılaşma (Encounter) Sistemi & Ordu Odaklanma (`Q`)
-- [ ] Zorunlu centroid uğraması olmadan geçerli kara koridorunda serbest yürüyüş + uzun mesafelerde hafif sağ/sol salınım (`waypoints`)
-- [ ] Ara düşman bölgelerinden geçerken durmadan ilerleme; yalnızca durulan/savaşılan/hedeflenen bölgenin ele geçirilmesi
-- [ ] Başka devletin ordusuyla karşılaşma tespiti (`Encounter`): oyunu otomatik durdurma, çift bazlı soğuma ve karar çözümleme (`Saldır`, `Savaş İlan Et & Saldır`, `Dur / Geri Çekil`, `Devam Et`)
-- [ ] `MapCamera.focusOnPoint` yumuşak odaklanma ve oyuncu orduları arasında sırayla zoomlama (`cyclePlayerArmyFocus` — `Q` + HUD butonu + ping halkası)
-- [ ] Aşama 2 otomatik testler + temiz build + `UPDATE_PROGRESS.md` güncellemesi + git commit
+- [x] Zorunlu centroid uğraması olmadan geçerli kara koridorunda serbest yürüyüş + uzun mesafelerde hafif sağ/sol salınım (`waypoints`)
+- [x] Ara düşman bölgelerinden geçerken durmadan ilerleme; yalnızca durulan/savaşılan/hedeflenen bölgenin ele geçirilmesi
+- [x] Başka devletin ordusuyla karşılaşma tespiti (`Encounter`): oyunu otomatik durdurma, çift bazlı soğuma ve karar çözümleme (`Saldır`, `Savaş İlan Et & Saldır`, `Dur / Geri Çekil`, `Devam Et`)
+- [x] `MapCamera.focusOnPoint` yumuşak odaklanma ve oyuncu orduları arasında sırayla zoomlama (`cyclePlayerArmyFocus` — `Q` + HUD butonu + ping halkası)
+- [x] Aşama 2 otomatik testler + temiz build + `UPDATE_PROGRESS.md` güncellemesi + git commit
 
 ---
 

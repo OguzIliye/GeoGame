@@ -62,6 +62,14 @@ export class MapCamera {
     this.cy = this.targetCy;
   }
 
+  focusOnPoint(mx: number, my: number, preferredMinScale?: number): void {
+    this.targetCx = mx;
+    this.targetCy = my;
+    const minFocus = preferredMinScale ?? Math.min(this.maxScale, Math.max(38, this.minScale * 3.2));
+    this.targetScale = Math.max(this.targetScale, minFocus);
+    this.clampTargets();
+  }
+
   mapToScreen(mx: number, my: number, viewW: number, viewH: number): Point {
     return [
       (mx - this.cx) * this.scale + viewW * 0.5,
