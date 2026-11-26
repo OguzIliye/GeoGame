@@ -3,9 +3,9 @@
 > Bu dosya [UPDATE_DESIGN.md](UPDATE_DESIGN.md) kapsamındaki tüm v1.1 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik test + temiz build + `UPDATE_PROGRESS.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 4 — `Pixel World` Ana Ekranı, Opsiyonel Tutorial, Görsel Bilim Ağacı, Karşılaşma Popup'ı, İkonlu Birlikler & Hover Kısayollar
-- **Tamamlanan Aşamalar:** 3 / 4
-- **Son Doğrulama (Test + Clean Build + Tarayıcı Uçtan Uca Kontrol):** [ ] Bekliyor
+- **Aktif Aşama:** Tamamlandı (Aşama 1 – Aşama 4 eksiksiz bitti)
+- **Tamamlanan Aşamalar:** 4 / 4
+- **Son Doğrulama (Test + Clean Build + Tarayıcı Uçtan Uca Kontrol):** [x] Tamamlandı (`32/32` Vitest testi geçti, `tsc --noEmit && vite build` sıfır hatayla derlendi, gerçek Chrome üzerinde `Pixel World` Ana Ekranı [Banka + Bazuka Asker] → Opsiyonel Tutorial → Görsel Bilim Ağacı + Hover Stat → Fareyle Manuel Bina Yerleştirme + Auto-Pause → World-Space Zoom & `Q` Odaklanma → Karşılaşma Popup'ı + İkonlu Birlikler + Diplomasi Sekmesi → Key Binding & Dinamik Hover Kısayol Notları sıfır hatayla doğrulandı.)
 
 ---
 
@@ -39,10 +39,10 @@
 ---
 
 ## Aşama 4 — `Pixel World` Ana Ekranı, Opsiyonel Tutorial, Görsel Bilim Ağacı, Karşılaşma Popup'ı, İkonlu Birlikler & Hover Kısayollar
-- [ ] **`Pixel World`** başlığı ve açılış Ana Ekranı (`PIXEL WORLD` piksel logosu, animasyonlu Banka + Bazuka tutan asker, `▶ Oyna` & `📖 Tutorial` butonları)
-- [ ] `Oyna` basıldığında opsiyonel *"Tutorial oynamak / incelemek ister misiniz?"* sorusu ve 5 adımlı görsel Tutorial penceresi
-- [ ] **Görsel Bilim Ağacı:** Başlangıç node'undan 2 çizgiyle ayrılan Silah ve Kalkan dalları, her node'da piksel ikon + altında gereken para + üstüne gelince stat kartı
-- [ ] **Karşılaşma (Encounter) Popup'ı:** İki tarafın toplam asker + ikonlu birlik kırılımlarını gösteren `Karşılaşma` sekmesi ve ülkeler arası ilişkileri gösteren üst `Diplomasi` sekmesi
-- [ ] **İkonlu Birlik İnceleme & Hover Tooltip:** Ordu penceresi (genel + Split), Karşılaşma popup'ı ve Gemi görünümünde silah/kalkan ikonları + fare tutunca sayı/silah/kalkan bilgisi
-- [ ] Fareyle manuel bina yerleştirme UX akışı, `🎯 Orduma Odaklan` HUD butonu (`Q`), Ayarlar içinde **Key Binding** düzenleyici ve tüm klavye kontrollü butonlarda **dinamik hover kısayol notu**
-- [ ] Aşama 4 otomatik testler + temiz build + gerçek Chrome tarayıcısında uçtan uca doğrulama + final `UPDATE_PROGRESS.md` + final git commit
+- [x] **`Pixel World`** başlığı ve açılış Ana Ekranı (`PIXEL WORLD` piksel logosu, animasyonlu Banka + Bazuka tutan asker, `▶ Oyna` & `📖 Tutorial` butonları)
+- [x] `Oyna` basıldığında opsiyonel *"Tutorial oynamak / incelemek ister misiniz?"* sorusu ve 5 adımlı görsel Tutorial penceresi
+- [x] **Görsel Bilim Ağacı:** Başlangıç node'undan 2 çizgiyle ayrılan Silah ve Kalkan dalları, her node'da piksel ikon + altında gereken para + üstüne gelince stat kartı
+- [x] **Karşılaşma (Encounter) Popup'ı:** İki tarafın toplam asker + ikonlu birlik kırılımlarını gösteren `Karşılaşma` sekmesi ve ülkeler arası ilişkileri gösteren üst `Diplomasi` sekmesi
+- [x] **İkonlu Birlik İnceleme & Hover Tooltip:** Ordu penceresi (genel + Split), Karşılaşma popup'ı ve Gemi görünümünde silah/kalkan ikonları + fare tutunca sayı/silah/kalkan bilgisi
+- [x] Fareyle manuel bina yerleştirme UX akışı, `🎯 Orduma Odaklan` HUD butonu (`Q`), Ayarlar içinde **Key Binding** düzenleyici ve tüm klavye kontrollü butonlarda **dinamik hover kısayol notu**
+- [x] Aşama 4 otomatik testler + temiz build + gerçek Chrome tarayıcısında uçtan uca doğrulama + final `UPDATE_PROGRESS.md` + final git commit

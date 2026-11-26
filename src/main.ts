@@ -1,11 +1,17 @@
 import { RetroMusicController } from './audio/music';
+import { KeyBindingsManager } from './config/keybindings';
 import { pickRegionAtPoint } from './map/arenaBuilder';
 import { fetchWorldCountries, pickWorldCountryAtPoint } from './map/worldLoader';
 import { MapCamera } from './render/camera';
-import { renderRegionalTheater, renderWorldSelectMap } from './render/mapRenderer';
+import {
+  renderMainMenuPixelScene,
+  renderRegionalTheater,
+  renderWorldSelectMap,
+} from './render/mapRenderer';
 import { tickAICountries } from './sim/ai';
 import {
   cancelSelectionAndOrderMode,
+  cyclePlayerArmyFocus,
   orderArmyAttackEnemyArmy,
   orderArmyEmbarkShip,
   orderArmyMoveToRegion,
@@ -14,11 +20,22 @@ import {
   pickShipAtPoint,
   tickArmiesCombatAndShips,
 } from './sim/army';
-import { advanceClock, togglePauseSpace } from './sim/calendar';
-import { pushImportantToast, tickEconomyAndQueues } from './sim/economy';
+import {
+  advanceClock,
+  clearAllAutoPauses,
+  setAutoPauseReason,
+  setGameSpeed,
+  togglePauseSpace,
+} from './sim/calendar';
+import {
+  pushImportantToast,
+  startBuildingConstruction,
+  tickEconomyAndQueues,
+  validateBuildingPlacementAtPoint,
+} from './sim/economy';
 import { checkEndGameConditions } from './sim/scoring';
 import { createInitialGameState, startGameWithCountry } from './state/gameStore';
-import type { WorldCountryFeature } from './types';
+import type { BuildingType, WorldCountryFeature } from './types';
 import { GameUIController } from './ui/windows';
 
 const WORLD_BOUNDS = { minX: -172, minY: -86, maxX: 186, maxY: 66 };
@@ -32,9 +49,36 @@ async function bootstrap(): Promise<void> {
   const state = createInitialGameState();
   const camera = new MapCamera();
   const music = new RetroMusicController();
+  const keyBindings = new KeyBindingsManager();
   let worldCountries: WorldCountryFeature[] = [];
 
-  const ui = new GameUIController(uiLayer, state, music, () => {
+  function syncCursor(): void {
+    if (state.phase === 'main_menu') {
+      canvas.style.cursor = 'default';
+    } else if (state.phase === 'world_select') {
+      canvas.style.cursor = state.hoveredWorldCountryId ? 'pointer' : 'grab';
+    } else if (state.placingBuildingType || state.moveOrderMode) {
+      canvas.style.cursor = 'crosshair';
+    } else {
+      canvas.style.cursor = 'default';
+    }
+  }
+
+  function cancelBuildingPlacement(): void {
+    state.placingBuildingType = null;
+    state.placementHoverPoint = null;
+    setAutoPauseReason(state, 'building_placement', false);
+    syncCursor();
+  }
+
+  function clearAllTacticalModes(): void {
+    cancelBuildingPlacement();
+    cancelSelectionAndOrderMode(state);
+    syncCursor();
+  }
+
+  function resetToWorldSelect(): void {
+    clearAllAutoPauses(state);
     state.phase = 'world_select';
     state.arena = null;
     state.countries = {};
@@ -42,10 +86,60 @@ async function bootstrap(): Promise<void> {
     state.armies = {};
     state.ships = {};
     state.wounded = [];
+    state.activeEncounter = null;
+    state.placingBuildingType = null;
+    state.placementHoverPoint = null;
     cancelSelectionAndOrderMode(state);
     state.selectedRegionId = null;
-    camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, false);
+    camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, true);
+    syncCursor();
     ui.forceRefresh();
+  }
+
+  function resetToMainMenu(): void {
+    resetToWorldSelect();
+    state.phase = 'main_menu';
+    state.tutorialPromptOpen = false;
+    syncCursor();
+    ui.forceRefresh();
+  }
+
+  function triggerCycleArmyFocus(): void {
+    const res = cyclePlayerArmyFocus(state, performance.now());
+    if (!res.ok || !res.target) {
+      pushImportantToast(state, 'Haritada aktif ordunuz bulunmuyor.', 'info');
+      return;
+    }
+    camera.focusOnPoint(res.target.x, res.target.y);
+    ui.syncFrame();
+  }
+
+  function enterBuildingPlacement(type: Exclude<BuildingType, 'combined'>): void {
+    cancelSelectionAndOrderMode(state);
+    state.placingBuildingType = type;
+    state.placementHoverPoint = [camera.cx, camera.cy];
+    setAutoPauseReason(state, 'building_placement', true);
+    ui.openWindow(null, false);
+    syncCursor();
+    ui.syncFrame();
+  }
+
+  const ui = new GameUIController(uiLayer, state, music, keyBindings, {
+    onStartWorldSelect: () => {
+      state.phase = 'world_select';
+      camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, true);
+      syncCursor();
+      ui.forceRefresh();
+    },
+    onReturnToWorld: resetToWorldSelect,
+    onReturnToMainMenu: resetToMainMenu,
+    onCycleArmyFocus: triggerCycleArmyFocus,
+    onEnterBuildingPlacement: enterBuildingPlacement,
+    onCancelPlacementOrOrder: () => {
+      clearAllTacticalModes();
+      if (ui.activeWindow === 'army') ui.openWindow(null, false);
+      ui.syncFrame();
+    },
   });
 
   // Start Web Audio music loop on first user interaction (browser autoplay compliance)
@@ -57,26 +151,18 @@ async function bootstrap(): Promise<void> {
     camera,
     ui,
     music,
+    keyBindings,
     getWorldCountries: () => worldCountries,
     selectCountryByName: (name: string) => {
       const found = worldCountries.find((c) => c.name === name);
       if (!found) return false;
       startGameWithCountry(state, found.id, worldCountries, found.centroid);
       if (state.arena) camera.setBounds(state.arena, canvas.width, canvas.height, true);
+      syncCursor();
       ui.forceRefresh();
       return true;
     },
   };
-
-  function syncCursor(): void {
-    if (state.phase === 'world_select') {
-      canvas.style.cursor = state.hoveredWorldCountryId ? 'pointer' : 'grab';
-    } else if (state.moveOrderMode) {
-      canvas.style.cursor = 'crosshair';
-    } else {
-      canvas.style.cursor = 'default';
-    }
-  }
 
   function resize(): void {
     canvas.width = window.innerWidth;
@@ -94,22 +180,70 @@ async function bootstrap(): Promise<void> {
   camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, true);
   ui.forceRefresh();
 
-  // Keyboard: Space = Pause/Resume (Esc intentionally NOT bound per DESIGN.md)
+  // Keyboard shortcuts via KeyBindingsManager (Esc never bound per DESIGN.md)
   window.addEventListener('keydown', (ev) => {
-    if (state.phase !== 'playing') return;
+    if (ui.listeningKeyAction) return;
     const tag = (ev.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if (ev.code === 'Space') {
+
+    const action = keyBindings.getActionForCode(ev.code);
+    if (!action) return;
+
+    if (action === 'openTutorial') {
       ev.preventDefault();
-      togglePauseSpace(state);
-      ui.syncFrame();
+      ui.toggleTutorial();
+      return;
+    }
+
+    if (state.phase !== 'playing') return;
+    ev.preventDefault();
+
+    switch (action) {
+      case 'togglePause':
+        togglePauseSpace(state);
+        ui.syncFrame();
+        break;
+      case 'speedSlow':
+        setGameSpeed(state, 0.5);
+        ui.syncFrame();
+        break;
+      case 'speedNormal':
+        setGameSpeed(state, 1);
+        ui.syncFrame();
+        break;
+      case 'speedFast':
+        setGameSpeed(state, 2);
+        ui.syncFrame();
+        break;
+      case 'cycleArmy':
+        triggerCycleArmyFocus();
+        break;
+      case 'openBuildings':
+        ui.openWindow('buildings');
+        break;
+      case 'openFactory':
+        ui.openWindow('factory');
+        break;
+      case 'openBarracks':
+        ui.openWindow('barracks');
+        break;
+      case 'openScience':
+        ui.openWindow('science');
+        break;
+      case 'openDiplomacy':
+        ui.openWindow('diplomacy');
+        break;
+      case 'openSettings':
+        ui.openWindow('settings');
+        break;
     }
   });
 
-  // Clicking on any UI element outside the map cancels army move order mode per DESIGN.md
+  // Clicking on UI elements outside the map cancels army move order mode per DESIGN.md
   uiLayer.addEventListener('mousedown', () => {
     if (state.moveOrderMode) {
       state.moveOrderMode = false;
+      setAutoPauseReason(state, 'move_order', false);
       syncCursor();
     }
   });
@@ -120,17 +254,16 @@ async function bootstrap(): Promise<void> {
   let lastY = 0;
 
   canvas.addEventListener('mousedown', (ev) => {
-    // Right-click cancels army/ship move order mode per DESIGN.md
+    // Right-click cancels building placement or army/ship move order mode
     if (ev.button === 2) {
       ev.preventDefault();
-      cancelSelectionAndOrderMode(state);
+      clearAllTacticalModes();
       if (ui.activeWindow === 'army') ui.openWindow(null, false);
-      syncCursor();
       ui.syncFrame();
       return;
     }
 
-    if (ev.button === 0) {
+    if (ev.button === 0 && state.phase !== 'main_menu') {
       isDragging = true;
       dragMoved = false;
       lastX = ev.clientX;
@@ -160,6 +293,16 @@ async function bootstrap(): Promise<void> {
         syncCursor();
         ui.setHoveredWorldCountryName(hit?.name ?? null);
       }
+      return;
+    }
+
+    if (state.phase === 'playing' && state.placingBuildingType) {
+      state.placementHoverPoint = camera.screenToMap(
+        ev.clientX,
+        ev.clientY,
+        canvas.width,
+        canvas.height,
+      );
     }
   });
 
@@ -182,9 +325,9 @@ async function bootstrap(): Promise<void> {
       return;
     }
 
-    if (state.phase !== 'playing') return;
+    if (state.phase !== 'playing' || state.activeEncounter) return;
 
-    // Outside active arena frame -> cancel move order mode per DESIGN.md
+    // Outside active arena frame -> cancel placement or move order mode
     if (
       state.arena &&
       (pt[0] < state.arena.minX ||
@@ -192,27 +335,56 @@ async function bootstrap(): Promise<void> {
         pt[1] < state.arena.minY ||
         pt[1] > state.arena.maxY)
     ) {
-      cancelSelectionAndOrderMode(state);
-      syncCursor();
+      clearAllTacticalModes();
       ui.syncFrame();
       return;
     }
 
-    const hitRadius = Math.max(0.35, 16 / camera.scale);
+    // 0. Interactive Mouse Building Placement Mode!
+    if (state.placingBuildingType && state.playerCountryId) {
+      const check = validateBuildingPlacementAtPoint(
+        state,
+        state.playerCountryId,
+        state.placingBuildingType,
+        pt,
+      );
+      if (!check.ok || !check.region) {
+        pushImportantToast(state, check.reason || 'Buraya bina kurulamaz.', 'info');
+        return;
+      }
+      const res = startBuildingConstruction(
+        state,
+        state.playerCountryId,
+        check.region.id,
+        state.placingBuildingType,
+        pt,
+      );
+      if (!res.ok) {
+        pushImportantToast(state, res.error || 'İnşaat başlatılamadı.', 'info');
+        return;
+      }
+      state.selectedRegionId = check.region.id;
+      cancelBuildingPlacement();
+      ui.syncFrame();
+      return;
+    }
+
+    const hitRadius = Math.max(0.35, 18 / camera.scale);
     const clickedArmy = pickArmyAtPoint(state, pt, hitRadius);
     const clickedShip = pickShipAtPoint(state, pt, hitRadius);
     const clickedReg = pickRegionAtPoint(pt, state.regions);
 
-    // A. Move Order Mode active (army or ship selected and awaiting destination)
+    // A. Move Order Mode active (army or ship selected and awaiting destination; game auto-paused!)
     if (state.moveOrderMode) {
       if (state.selectedArmyId && state.armies[state.selectedArmyId]) {
         const myArmy = state.armies[state.selectedArmyId];
 
-        // 1. Click friendly ship -> Embark / Re-embark ("önce askere sonra gemiye tıklamalıyız")
+        // 1. Click friendly ship -> Embark / Re-embark
         if (clickedShip && clickedShip.countryId === state.playerCountryId) {
           const res = orderArmyEmbarkShip(state, myArmy.id, clickedShip.id);
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
+          setAutoPauseReason(state, 'move_order', false);
           syncCursor();
           return;
         }
@@ -222,12 +394,17 @@ async function bootstrap(): Promise<void> {
           const res = orderArmyAttackEnemyArmy(state, myArmy.id, clickedArmy.id);
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
+          setAutoPauseReason(state, 'move_order', false);
           syncCursor();
           return;
         }
 
         // 3. Click another friendly army -> switch selection to it
-        if (clickedArmy && clickedArmy.countryId === state.playerCountryId && clickedArmy.id !== myArmy.id) {
+        if (
+          clickedArmy &&
+          clickedArmy.countryId === state.playerCountryId &&
+          clickedArmy.id !== myArmy.id
+        ) {
           state.selectedArmyId = clickedArmy.id;
           ui.openWindow('army', false);
           syncCursor();
@@ -239,6 +416,7 @@ async function bootstrap(): Promise<void> {
           const res = orderArmyMoveToRegion(state, myArmy.id, clickedReg.id, pt);
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
+          setAutoPauseReason(state, 'move_order', false);
           if (ui.activeWindow === 'army') ui.openWindow(null, false);
           syncCursor();
           return;
@@ -256,6 +434,7 @@ async function bootstrap(): Promise<void> {
           const res = orderShipSailToCoastalRegion(state, state.selectedShipId, clickedReg.id);
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
+          setAutoPauseReason(state, 'move_order', false);
           syncCursor();
           return;
         }
@@ -269,8 +448,10 @@ async function bootstrap(): Promise<void> {
     if (clickedArmy) {
       state.selectedArmyId = clickedArmy.id;
       state.selectedShipId = null;
-      state.moveOrderMode =
+      const canCommand =
         clickedArmy.countryId === state.playerCountryId && !clickedArmy.inCombatWithArmyId;
+      state.moveOrderMode = canCommand;
+      setAutoPauseReason(state, 'move_order', canCommand);
       ui.openWindow('army', false);
       syncCursor();
       return;
@@ -280,6 +461,7 @@ async function bootstrap(): Promise<void> {
       state.selectedShipId = clickedShip.id;
       state.selectedArmyId = null;
       state.moveOrderMode = true;
+      setAutoPauseReason(state, 'move_order', true);
       syncCursor();
       return;
     }
@@ -287,9 +469,7 @@ async function bootstrap(): Promise<void> {
     if (clickedReg) {
       cancelSelectionAndOrderMode(state);
       state.selectedRegionId = clickedReg.id;
-      if (ui.activeWindow === 'buildings') {
-        ui.renderModal();
-      } else if (ui.activeWindow === 'army') {
+      if (ui.activeWindow === 'army') {
         ui.openWindow(null, false);
       }
       syncCursor();
@@ -306,6 +486,7 @@ async function bootstrap(): Promise<void> {
   canvas.addEventListener(
     'wheel',
     (ev) => {
+      if (state.phase === 'main_menu') return;
       ev.preventDefault();
       const factor = ev.deltaY < 0 ? 1.18 : 1 / 1.18;
       camera.zoomAtScreenPoint(factor, ev.clientX, ev.clientY, canvas.width, canvas.height);
@@ -331,7 +512,9 @@ async function bootstrap(): Promise<void> {
 
     ui.syncFrame();
 
-    if (state.phase === 'world_select') {
+    if (state.phase === 'main_menu') {
+      renderMainMenuPixelScene(ctx!, canvas.width, canvas.height, nowMs);
+    } else if (state.phase === 'world_select') {
       renderWorldSelectMap(ctx!, worldCountries, state, camera, canvas.width, canvas.height, nowMs);
     } else {
       renderRegionalTheater(ctx!, state, camera, canvas.width, canvas.height, nowMs);

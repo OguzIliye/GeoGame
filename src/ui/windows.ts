@@ -1,22 +1,40 @@
+import { getTechItemSpriteDataUri, getUnitSpriteDataUri } from '../art/pixelSprites';
 import { RetroMusicController } from '../audio/music';
 import {
   BUILDINGS,
+  CALENDAR,
   COMBINED_UPGRADE_COSTS,
   SHIELD_ORDER,
   SHIELDS,
   WEAPON_ORDER,
   WEAPONS,
 } from '../config/balance';
+import { type KeyActionId, KeyBindingsManager } from '../config/keybindings';
 import {
+  computeArmyAverageStats,
+  type EncounterChoice,
   formatUnitKeyLabel,
   getMergeableFriendlyArmies,
   getNonZeroUnits,
   getTotalSoldiers,
   mergeArmies,
+  parseUnitKey,
+  resolveEncounterChoice,
   splitArmyStack,
 } from '../sim/army';
-import { formatSimDate, setGameSpeed } from '../sim/calendar';
-import { declareWar, getDiplomacyEdge, proposeAlliance, proposePeace } from '../sim/diplomacy';
+import {
+  formatSimDate,
+  isAutoPaused,
+  setAutoPauseReason,
+  setGameSpeed,
+} from '../sim/calendar';
+import {
+  declareWar,
+  getDiplomacyEdge,
+  getRelationStatus,
+  proposeAlliance,
+  proposePeace,
+} from '../sim/diplomacy';
 import {
   getCountryHealthPct,
   getCountryManpowerPerSec,
@@ -25,7 +43,6 @@ import {
   getEffectiveBuildingCount,
   queueBarracksTraining,
   queueFactoryProduction,
-  startBuildingConstruction,
   startCombinedBuildingUpgrade,
   startTechResearch,
 } from '../sim/economy';
@@ -42,53 +59,278 @@ export type ActiveWindowId =
   | 'army'
   | 'settings';
 
+export interface GameUICallbacks {
+  onStartWorldSelect: () => void;
+  onReturnToWorld: () => void;
+  onReturnToMainMenu: () => void;
+  onCycleArmyFocus: () => void;
+  onEnterBuildingPlacement: (type: Exclude<BuildingType, 'combined'>) => void;
+  onCancelPlacementOrOrder: () => void;
+}
+
+function escapeAttr(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function buildUnitHoverTooltip(unitKey: string, count: number): string {
+  const { weapon, shield } = parseUnitKey(unitKey);
+  const wSpec = WEAPONS[weapon];
+  const sSpec = shield === 'none' ? null : SHIELDS[shield];
+  const sText = sSpec ? `${sSpec.name} (Koruma: ${sSpec.defense})` : 'Kalkansız (Koruma: 0)';
+  return `Birlik Sayısı: ${count} Asker\nSilah: ${wSpec.name} (Hasar: ${wSpec.damage})\nKalkan: ${sText}`;
+}
+
+function renderUnitIconCardHtml(
+  unitKey: string,
+  count: number,
+  ownerColor: string,
+  extraBottomHtml = '',
+): string {
+  const { weapon, shield } = parseUnitKey(unitKey);
+  const uri = getUnitSpriteDataUri(weapon, shield, ownerColor);
+  const tip = escapeAttr(buildUnitHoverTooltip(unitKey, count));
+  const shortS = shield === 'none' ? 'Yok' : SHIELDS[shield].name.split(' ')[0];
+  return `
+    <div class="unit-icon-card" data-hover-tip="${tip}">
+      <span class="unit-count-pill">×${count}</span>
+      <img src="${uri}" alt="${escapeAttr(formatUnitKeyLabel(unitKey))}" />
+      <div class="unit-mini-label">${WEAPONS[weapon].name} + ${shortS}</div>
+      ${extraBottomHtml}
+    </div>
+  `;
+}
+
 export class GameUIController {
   activeWindow: ActiveWindowId = null;
   selectedDiplomacyCountryId: string | null = null;
+  listeningKeyAction: KeyActionId | null = null;
+  tutorialOpen = false;
+  tutorialStep = 0;
   lastErrorMsg = '';
+
   private root: HTMLDivElement;
   private state: GameState;
   private music: RetroMusicController;
-  private onReturnToWorld: () => void;
+  private keyBindings: KeyBindingsManager;
+  private callbacks: GameUICallbacks;
   private mountedPhase: string | null = null;
+  private mountedEncounterKey: string | null = null;
+  private mountedPromptOpen = false;
+  private tooltipEl: HTMLDivElement;
+  private currentHoverTarget: HTMLElement | null = null;
 
   constructor(
     root: HTMLDivElement,
     state: GameState,
     music: RetroMusicController,
-    onReturnToWorld: () => void,
+    keyBindings: KeyBindingsManager,
+    callbacks: GameUICallbacks,
   ) {
     this.root = root;
     this.state = state;
     this.music = music;
-    this.onReturnToWorld = onReturnToWorld;
+    this.keyBindings = keyBindings;
+    this.callbacks = callbacks;
+
+    this.tooltipEl = document.createElement('div');
+    this.tooltipEl.id = 'pixel-tooltip';
+    this.tooltipEl.className = 'pixel-tooltip';
+    this.tooltipEl.style.display = 'none';
+    document.body.appendChild(this.tooltipEl);
+
+    this.setupTooltipDelegation();
+    this.setupKeybindCaptureListener();
+
+    this.keyBindings.onChange(() => {
+      this.refreshKeyBadgesInDOM();
+      if (this.currentHoverTarget) {
+        this.updateTooltipContentForElement(this.currentHoverTarget);
+      }
+    });
+  }
+
+  private setupTooltipDelegation(): void {
+    window.addEventListener('mouseover', (ev) => {
+      const target = (ev.target as HTMLElement | null)?.closest<HTMLElement>(
+        '[data-hover-tip], [data-key-action]',
+      );
+      if (!target || !this.root.contains(target)) {
+        this.hideTooltip();
+        return;
+      }
+      this.currentHoverTarget = target;
+      this.updateTooltipContentForElement(target);
+      this.positionTooltip(ev.clientX, ev.clientY);
+    });
+
+    window.addEventListener('mousemove', (ev) => {
+      if (this.currentHoverTarget && this.tooltipEl.style.display !== 'none') {
+        if (!document.body.contains(this.currentHoverTarget)) {
+          this.hideTooltip();
+          return;
+        }
+        this.positionTooltip(ev.clientX, ev.clientY);
+      }
+    });
+
+    window.addEventListener('mousedown', () => {
+      this.hideTooltip();
+    });
+  }
+
+  private updateTooltipContentForElement(el: HTMLElement): void {
+    const customTip = el.dataset.hoverTip;
+    if (customTip) {
+      this.tooltipEl.textContent = customTip;
+      this.tooltipEl.style.display = 'block';
+      return;
+    }
+    const action = el.dataset.keyAction as KeyActionId | undefined;
+    if (action) {
+      this.tooltipEl.textContent = this.keyBindings.getTooltipText(action);
+      this.tooltipEl.style.display = 'block';
+      return;
+    }
+    this.hideTooltip();
+  }
+
+  private positionTooltip(clientX: number, clientY: number): void {
+    const pad = 14;
+    const rect = this.tooltipEl.getBoundingClientRect();
+    let left = clientX + pad;
+    let top = clientY + pad;
+    if (left + rect.width > window.innerWidth - 8) {
+      left = Math.max(8, clientX - rect.width - pad);
+    }
+    if (top + rect.height > window.innerHeight - 8) {
+      top = Math.max(8, clientY - rect.height - pad);
+    }
+    this.tooltipEl.style.left = `${Math.round(left)}px`;
+    this.tooltipEl.style.top = `${Math.round(top)}px`;
+  }
+
+  hideTooltip(): void {
+    this.currentHoverTarget = null;
+    this.tooltipEl.style.display = 'none';
+  }
+
+  private setupKeybindCaptureListener(): void {
+    window.addEventListener(
+      'keydown',
+      (ev) => {
+        if (!this.listeningKeyAction) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        const action = this.listeningKeyAction;
+        this.listeningKeyAction = null;
+        const res = this.keyBindings.bindKey(action, ev.code);
+        if (!res.ok) {
+          this.lastErrorMsg = res.error || 'Tuş atanamadı.';
+        } else if (res.swappedWith) {
+          this.lastErrorMsg = '';
+        } else {
+          this.lastErrorMsg = '';
+        }
+        this.renderModal();
+      },
+      true,
+    );
+  }
+
+  private refreshKeyBadgesInDOM(): void {
+    const focusBtn = document.getElementById('btn-cycle-army');
+    if (focusBtn) {
+      focusBtn.textContent = `🎯 Ordum [${this.keyBindings.getDisplayLabel('cycleArmy')}]`;
+    }
+  }
+
+  openTutorial(step = 0): void {
+    this.tutorialOpen = true;
+    this.tutorialStep = step;
+    this.state.tutorialSeen = true;
+    this.state.tutorialPromptOpen = false;
+    if (this.state.phase === 'playing') {
+      setAutoPauseReason(this.state, 'tutorial', true);
+    }
+    this.renderTutorialOverlay();
+  }
+
+  closeTutorial(): void {
+    this.tutorialOpen = false;
+    setAutoPauseReason(this.state, 'tutorial', false);
+    const host = document.getElementById('tutorial-host');
+    if (host) host.innerHTML = '';
+    this.syncFrame();
+  }
+
+  toggleTutorial(): void {
+    if (this.tutorialOpen) this.closeTutorial();
+    else this.openTutorial(0);
   }
 
   openWindow(win: ActiveWindowId, toggle = true): void {
-    this.activeWindow = toggle && this.activeWindow === win ? null : win;
+    this.listeningKeyAction = null;
+    const next = toggle && this.activeWindow === win ? null : win;
+    if (next !== null && this.state.placingBuildingType) {
+      this.state.placingBuildingType = null;
+      this.state.placementHoverPoint = null;
+      setAutoPauseReason(this.state, 'building_placement', false);
+    }
+    this.activeWindow = next;
     this.lastErrorMsg = '';
+    this.hideTooltip();
     this.renderModal();
     this.syncDockButtons();
   }
 
   forceRefresh(): void {
     this.mountedPhase = null;
+    this.mountedEncounterKey = null;
+    this.hideTooltip();
     this.syncFrame();
     this.renderModal();
+    if (this.tutorialOpen) this.renderTutorialOverlay();
   }
 
   syncFrame(): void {
+    if (this.state.phase === 'main_menu') {
+      if (
+        this.mountedPhase !== 'main_menu' ||
+        this.mountedPromptOpen !== this.state.tutorialPromptOpen
+      ) {
+        this.mountedPhase = 'main_menu';
+        this.mountedPromptOpen = this.state.tutorialPromptOpen;
+        this.activeWindow = null;
+        this.mountMainMenu();
+      }
+      return;
+    }
+
     if (this.state.phase === 'world_select') {
       if (this.mountedPhase !== 'world_select') {
         this.mountedPhase = 'world_select';
         this.activeWindow = null;
         this.root.innerHTML = `
           <div class="pixel-panel top-banner">
-            <strong>GEOGAME</strong>
+            <strong>PIXEL WORLD</strong>
             <span>Başlamak için dünya haritasından bir ülkeye tıklayın</span>
             <span id="world-hover-badge" class="badge" style="display:none"></span>
+            <button class="pixel-btn" id="btn-world-tutorial" data-key-action="openTutorial">📖 Tutorial</button>
+            <button class="pixel-btn" id="btn-back-main">← Ana Ekran</button>
           </div>
+          <div id="tutorial-host"></div>
         `;
+        document
+          .getElementById('btn-world-tutorial')
+          ?.addEventListener('click', () => this.openTutorial(0));
+        document
+          .getElementById('btn-back-main')
+          ?.addEventListener('click', () => this.callbacks.onReturnToMainMenu());
+        if (this.tutorialOpen) this.renderTutorialOverlay();
       }
       return;
     }
@@ -110,12 +352,190 @@ export class GameUIController {
     this.updateLiveHUD();
     this.updateToasts();
     this.updateLiveProgressInsideModal();
+    this.syncEncounterOverlay();
+  }
+
+  private mountMainMenu(): void {
+    const promptHtml = this.state.tutorialPromptOpen
+      ? `
+        <div class="tutorial-prompt-modal">
+          <div class="pixel-panel modal-window" style="max-width:460px;text-align:center">
+            <div class="modal-header" style="justify-content:center">
+              <strong>📖 Tutorial Seçeneği</strong>
+            </div>
+            <p style="margin:12px 0;line-height:1.6;font-size:13px">
+              Oyuna başlamadan önce <b>Pixel World</b>'ün nasıl oynandığını gösteren kısa Tutorial'ı oynamak / incelemek ister misiniz?
+            </p>
+            <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px">
+              <button class="pixel-btn active-btn" id="btn-prompt-yes">📖 Evet, Tutorial'ı Aç</button>
+              <button class="pixel-btn" id="btn-prompt-no">▶ Hayır, Direkt Haritaya Geç</button>
+            </div>
+          </div>
+        </div>
+      `
+      : '';
+
+    this.root.innerHTML = `
+      <div class="main-menu-shell">
+        <div class="pixel-panel main-menu-actions">
+          <div class="muted" style="font-size:12px;color:#cbd5e1;text-align:center">
+            Bölgesel Strateji • Ekonomi • Teknoloji • Savaş
+          </div>
+          <div class="main-menu-btn-row">
+            <button class="pixel-btn hero-btn hero-btn-primary" id="btn-main-play">▶ Oyna</button>
+            <button class="pixel-btn hero-btn" id="btn-main-tutorial">📖 Tutorial</button>
+          </div>
+        </div>
+      </div>
+      ${promptHtml}
+      <div id="tutorial-host"></div>
+    `;
+
+    document.getElementById('btn-main-play')?.addEventListener('click', () => {
+      if (!this.state.tutorialSeen) {
+        this.state.tutorialPromptOpen = true;
+        this.syncFrame();
+      } else {
+        this.callbacks.onStartWorldSelect();
+      }
+    });
+
+    document.getElementById('btn-main-tutorial')?.addEventListener('click', () => {
+      this.openTutorial(0);
+    });
+
+    document.getElementById('btn-prompt-yes')?.addEventListener('click', () => {
+      this.openTutorial(0);
+    });
+
+    document.getElementById('btn-prompt-no')?.addEventListener('click', () => {
+      this.state.tutorialSeen = true;
+      this.state.tutorialPromptOpen = false;
+      this.callbacks.onStartWorldSelect();
+    });
+
+    if (this.tutorialOpen) this.renderTutorialOverlay();
+  }
+
+  private renderTutorialOverlay(): void {
+    const host = document.getElementById('tutorial-host');
+    if (!host) return;
+    if (!this.tutorialOpen) {
+      host.innerHTML = '';
+      return;
+    }
+
+    const bazookaUri = getUnitSpriteDataUri('bazooka', 'forcefield', '#3b82f6');
+    const spearUri = getUnitSpriteDataUri('spear', 'bronze', '#22c55e');
+    const rootSciUri = getTechItemSpriteDataUri('root', 'base');
+
+    const steps = [
+      {
+        title: '1/5 — Dünya Haritası & Bölgesel Arena',
+        body: `
+          <p>🌍 Haritadan dilediğiniz ülkeye tıklayarak oyuna başlarsınız. Seçtiğiniz ülkenin etrafında en fazla <b>15 AI ülke</b> içeren aktif bir bölgesel arena açılır.</p>
+          <p style="margin-top:8px">⏱️ <b>Zaman Akışı:</b> <code>1x</code> hızda gerçek 1 saniye çeyrek oyun günüdür (<code>4 sn = 1 gün</code>). Tam kampanya <code>1 Ocak 2000 → 1 Ocak ${CALENDAR.END_YEAR}</code> (~4 saat) sürer; tüm bölgeyi daha erken fethederseniz erken zafer kazanırsınız.</p>
+          <p style="margin-top:8px">🔍 Fare tekerleğiyle haritaya yaklaştığınızda binalar ve askerler haritayla birlikte büyür; detaylı pixel art'ları yakından inceleyebilirsiniz.</p>
+        `,
+      },
+      {
+        title: '2/5 — Ekonomi & Fareyle Manuel Bina Kurma',
+        body: `
+          <p>💰 <b>Banka</b> para (<code>+12/sn</code>), ❤️ <b>Hastane</b> sağlık ve Manpower artışı sağlar. Her bölgeye en fazla <b>1 bina</b> kurulur (1–4 bölgeli küçük ülkelerde tüm işlevler 3 kademeli <b>Merkez Kompleks</b>'te birleşir).</p>
+          <p style="margin-top:8px">🖱️ <b>Manuel Yerleştirme & Otomatik Duraklatma:</b> <b>Binalar</b> menüsünden bir bina seçtiğinizde <b>oyun otomatik durur</b> ve binayı haritada fareyle istediğiniz noktaya sol tıklayarak yerleştirirsiniz (Sağ tık = İptal).</p>
+        `,
+      },
+      {
+        title: '3/5 — Görsel Bilim Ağacı, Fabrika & Kışla',
+        body: `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+            <img src="${rootSciUri}" style="width:44px;height:44px" alt="Bilim" />
+            <span>🔬 <b>Üniversite (Bilim Ağacı):</b> Başlangıç düğümünden <b>Silah</b> ve <b>Kalkan</b> olarak iki dala ayrılır. İkonların altında gereken para yazar, fareyle üstüne gelince tüm statlar görünür.</span>
+          </div>
+          <p>⚙️ <b>Fabrika</b>'da açtığınız silah ve kalkanları üretir, 🛡️ <b>Kışla</b>'da Manpower + ekipman birleştirerek asker yetiştirirsiniz.</p>
+        `,
+      },
+      {
+        title: '4/5 — Ordular, Karşılaşma Popup\'ı, Hastane & Liman',
+        body: `
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+            <img src="${spearUri}" style="width:48px;height:44px" alt="Asker" />
+            <img src="${bazookaUri}" style="width:48px;height:44px" alt="Bazuka" />
+            <span>⚔️ Ordunuza sol tıklayınca oyun düşünmeniz için duraklatılır; gideceği hedefe sol tıklayın (Sağ tık = İptal). Ordular günde ~1 bölge hızıyla ilerler ve yalnızca durup savaştıkları/hedefledikleri bölgeyi fetheder.</span>
+          </div>
+          <p>🚨 <b>Karşılaşma Popup'ı:</b> Önünüze başka devletin askeri çıkarsa oyun durur; iki tarafın ikonlu birlik sayıları ve üstte <b>Diplomasi</b> sekmesiyle karar verirsiniz. Çatışmada düşenlerin <b>%30'u</b> ayakta Hastane varsa iyileşip eski ekipmanıyla döner. Kıyı ülkeleri <b>Liman</b> gemisiyle denizden asker taşır.</p>
+        `,
+      },
+      {
+        title: '5/5 — Ordu Odaklanma (Q), Diplomasi & Tuş Atama',
+        body: `
+          <p>🎯 <b>Ordularınızı Bulma:</b> Kendi ordularınız haritada parlak ülke rengi dış çizgi ve <code>★</code> yıldızlı rozetle görünür. Üst bardaki <b>🎯 Ordum</b> butonuna veya <b>[${this.keyBindings.getDisplayLabel('cycleArmy')}]</b> tuşuna her bastığınızda kamera sırayla birliklerinizin üzerine zoomlar.</p>
+          <p style="margin-top:8px">⌨️ <b>Tuş Atama (Key Binding):</b> <b>Ayarlar</b> menüsünden tüm kısayolları değiştirebilirsiniz. Ekranda klavyeyle kontrol edilebilen herhangi bir butonun üstüne fareyle geldiğinizde atalı tuş not olarak gösterilir.</p>
+        `,
+      },
+    ];
+
+    const cur = steps[this.tutorialStep] ?? steps[0];
+
+    host.innerHTML = `
+      <div class="tutorial-prompt-modal">
+        <div class="pixel-panel modal-window" style="max-width:660px">
+          <div class="modal-header">
+            <strong>📖 Pixel World — ${cur.title}</strong>
+            <button class="pixel-btn" id="btn-tut-close">✕</button>
+          </div>
+          <div class="tab-strip">
+            ${steps
+              .map(
+                (_, idx) => `
+              <button class="pixel-btn ${idx === this.tutorialStep ? 'active-btn' : ''}" data-tut-step="${idx}">
+                Adım ${idx + 1}
+              </button>
+            `,
+              )
+              .join('')}
+          </div>
+          <div style="line-height:1.65;font-size:13px;padding:6px 2px;min-height:140px">
+            ${cur.body}
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;gap:8px">
+              <button class="pixel-btn" id="btn-tut-prev" ${this.tutorialStep === 0 ? 'disabled' : ''}>◀ Önceki</button>
+              <button class="pixel-btn" id="btn-tut-next" ${this.tutorialStep === steps.length - 1 ? 'disabled' : ''}>Sonraki ▶</button>
+            </div>
+            ${
+              this.state.phase === 'main_menu'
+                ? `<button class="pixel-btn active-btn" id="btn-tut-start-play">▶ Haritaya Geç / Oyna</button>`
+                : `<button class="pixel-btn active-btn" id="btn-tut-done">✓ Anladım, Devam Et</button>`
+            }
+          </div>
+        </div>
+      </div>
+    `;
+
+    host.querySelector('#btn-tut-close')?.addEventListener('click', () => this.closeTutorial());
+    host.querySelector('#btn-tut-done')?.addEventListener('click', () => this.closeTutorial());
+    host.querySelector('#btn-tut-prev')?.addEventListener('click', () => {
+      if (this.tutorialStep > 0) this.openTutorial(this.tutorialStep - 1);
+    });
+    host.querySelector('#btn-tut-next')?.addEventListener('click', () => {
+      if (this.tutorialStep < steps.length - 1) this.openTutorial(this.tutorialStep + 1);
+    });
+    host.querySelectorAll<HTMLButtonElement>('[data-tut-step]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.openTutorial(Number(btn.dataset.tutStep || 0));
+      });
+    });
+    host.querySelector('#btn-tut-start-play')?.addEventListener('click', () => {
+      this.closeTutorial();
+      this.callbacks.onStartWorldSelect();
+    });
   }
 
   private mountEndedScreen(): void {
     const standings = computeStandings(this.state);
     const playerRow = standings.find((s) => s.isPlayer);
-    let title = '🏁 1 Ocak 2020 — Oyun Sonu Stat Karşılaştırması';
+    let title = `🏁 1 Ocak ${CALENDAR.END_YEAR} — Oyun Sonu Stat Karşılaştırması`;
     let subtitle = playerRow
       ? playerRow.rank === 1
         ? '🏆 Tebrikler! En yüksek skorla oyunu 1. sırada kazandınız!'
@@ -135,7 +555,10 @@ export class GameUIController {
         <div class="pixel-panel modal-window">
           <div class="modal-header">
             <strong>${title}</strong>
-            <button class="pixel-btn" id="btn-play-again">🌍 Yeni Oyun</button>
+            <div style="display:flex;gap:8px">
+              <button class="pixel-btn active-btn" id="btn-play-again">🌍 Ülke Seç</button>
+              <button class="pixel-btn" id="btn-end-main">🏠 Ana Ekran</button>
+            </div>
           </div>
           <div class="status-line">${subtitle}</div>
           <table class="stats-table">
@@ -175,7 +598,10 @@ export class GameUIController {
     `;
 
     document.getElementById('btn-play-again')?.addEventListener('click', () => {
-      this.onReturnToWorld();
+      this.callbacks.onReturnToWorld();
+    });
+    document.getElementById('btn-end-main')?.addEventListener('click', () => {
+      this.callbacks.onReturnToMainMenu();
     });
   }
 
@@ -191,43 +617,51 @@ export class GameUIController {
   }
 
   private mountPlayingShell(): void {
+    const qLabel = this.keyBindings.getDisplayLabel('cycleArmy');
     this.root.innerHTML = `
       <div class="hud-topbar pixel-panel">
         <div class="hud-group">
           <strong id="hud-country">★ Ülke</strong>
           <span id="hud-date" class="badge">1 Oca 2000</span>
-          <span id="hud-order-hint" class="badge" style="display:none;background:#854d0e;border-color:#facc15">
-            🎯 Hedefe Sol Tıkla (Sağ Tık: İptal)
+          <span id="hud-autopause-badge" class="badge" style="display:none;background:#7c2d12;border-color:#fb923c">
+            ⏸ Eylem Bekleniyor
           </span>
+          <button class="pixel-btn" id="btn-cancel-action" style="display:none;border-color:#facc15;color:#fef08a">
+            ✕ İptal (Sağ Tık)
+          </button>
         </div>
         <div class="hud-group">
-          <span title="Para ve saniyelik gelir">💰 <b id="hud-money">300</b> (<span id="hud-money-rate">+5</span>/s)</span>
-          <span title="Manpower ve saniyelik artış">👥 <b id="hud-mp">50</b> (<span id="hud-mp-rate">+1</span>/s)</span>
-          <span title="Ülke sağlık oranı">❤️ <b id="hud-health">%50</b></span>
-          <span title="Sahada toplam asker">⚔️ <b id="hud-soldiers">0</b></span>
+          <span>💰 <b id="hud-money">300</b> (<span id="hud-money-rate">+5</span>/s)</span>
+          <span>👥 <b id="hud-mp">50</b> (<span id="hud-mp-rate">+1</span>/s)</span>
+          <span>❤️ <b id="hud-health">%50</b></span>
+          <span>⚔️ <b id="hud-soldiers">0</b></span>
+          <button class="pixel-btn" id="btn-cycle-army" data-key-action="cycleArmy">🎯 Ordum [${qLabel}]</button>
         </div>
         <div class="hud-group speed-controls">
-          <button class="pixel-btn speed-btn" data-speed="0">⏸</button>
-          <button class="pixel-btn speed-btn" data-speed="0.5">0.5x</button>
-          <button class="pixel-btn speed-btn" data-speed="1">1x</button>
-          <button class="pixel-btn speed-btn" data-speed="2">2x</button>
-          <button class="pixel-btn dock-btn" data-win="settings">🎵 Ayarlar</button>
+          <button class="pixel-btn speed-btn" data-speed="0" data-key-action="togglePause">⏸</button>
+          <button class="pixel-btn speed-btn" data-speed="0.5" data-key-action="speedSlow">0.5x</button>
+          <button class="pixel-btn speed-btn" data-speed="1" data-key-action="speedNormal">1x</button>
+          <button class="pixel-btn speed-btn" data-speed="2" data-key-action="speedFast">2x</button>
+          <button class="pixel-btn" id="btn-hud-tutorial" data-key-action="openTutorial">📖</button>
+          <button class="pixel-btn dock-btn" data-win="settings" data-key-action="openSettings">⚙️ Ayarlar</button>
         </div>
       </div>
 
       <div id="toast-strip" class="toast-strip"></div>
 
       <div class="hud-dock pixel-panel">
-        <button class="pixel-btn dock-btn" data-win="buildings">🏗️ Binalar</button>
-        <button class="pixel-btn dock-btn" data-win="factory">⚙️ Fabrika</button>
-        <button class="pixel-btn dock-btn" data-win="barracks">🛡️ Kışla</button>
-        <button class="pixel-btn dock-btn" data-win="science">🔬 Bilim</button>
-        <button class="pixel-btn dock-btn" data-win="diplomacy">📜 Diplomasi</button>
+        <button class="pixel-btn dock-btn" data-win="buildings" data-key-action="openBuildings">🏗️ Binalar</button>
+        <button class="pixel-btn dock-btn" data-win="factory" data-key-action="openFactory">⚙️ Fabrika</button>
+        <button class="pixel-btn dock-btn" data-win="barracks" data-key-action="openBarracks">🛡️ Kışla</button>
+        <button class="pixel-btn dock-btn" data-win="science" data-key-action="openScience">🔬 Bilim</button>
+        <button class="pixel-btn dock-btn" data-win="diplomacy" data-key-action="openDiplomacy">📜 Diplomasi</button>
         <button class="pixel-btn" id="btn-world-reset">🌍 Harita</button>
       </div>
 
       <div id="region-bar" class="side-inspector pixel-panel" style="display:none"></div>
       <div id="modal-host" class="modal-host"></div>
+      <div id="encounter-host"></div>
+      <div id="tutorial-host"></div>
     `;
 
     this.root.querySelectorAll<HTMLButtonElement>('.speed-btn').forEach((btn) => {
@@ -245,8 +679,20 @@ export class GameUIController {
       });
     });
 
+    document.getElementById('btn-cycle-army')?.addEventListener('click', () => {
+      this.callbacks.onCycleArmyFocus();
+    });
+
+    document.getElementById('btn-hud-tutorial')?.addEventListener('click', () => {
+      this.toggleTutorial();
+    });
+
+    document.getElementById('btn-cancel-action')?.addEventListener('click', () => {
+      this.callbacks.onCancelPlacementOrOrder();
+    });
+
     document.getElementById('btn-world-reset')?.addEventListener('click', () => {
-      this.onReturnToWorld();
+      this.callbacks.onReturnToWorld();
     });
   }
 
@@ -274,9 +720,26 @@ export class GameUIController {
     setTxt('hud-mp-rate', `+${getCountryManpowerPerSec(this.state, pid)}`);
     setTxt('hud-health', `%${getCountryHealthPct(this.state, pid)}`);
 
-    const hintEl = document.getElementById('hud-order-hint');
-    if (hintEl) {
-      hintEl.style.display = this.state.moveOrderMode ? 'inline-block' : 'none';
+    const autoBadge = document.getElementById('hud-autopause-badge');
+    const cancelBtn = document.getElementById('btn-cancel-action');
+    if (autoBadge) {
+      if (this.state.placingBuildingType) {
+        const bName = BUILDINGS[this.state.placingBuildingType].name;
+        autoBadge.style.display = 'inline-block';
+        autoBadge.textContent = `⏸ ${bName} Yerleştiriliyor — Haritaya Sol Tıkla`;
+      } else if (this.state.moveOrderMode) {
+        autoBadge.style.display = 'inline-block';
+        autoBadge.textContent = '⏸ Hedef Seçiliyor — Haritaya Sol Tıkla';
+      } else if (isAutoPaused(this.state)) {
+        autoBadge.style.display = 'inline-block';
+        autoBadge.textContent = '⏸ Eylem İçin Duraklatıldı';
+      } else {
+        autoBadge.style.display = 'none';
+      }
+    }
+    if (cancelBtn) {
+      cancelBtn.style.display =
+        this.state.placingBuildingType || this.state.moveOrderMode ? 'inline-block' : 'none';
     }
 
     let totalSoldiers = 0;
@@ -298,28 +761,46 @@ export class GameUIController {
     if (regEl) {
       if (this.state.selectedShipId && this.state.ships[this.state.selectedShipId]) {
         const sh = this.state.ships[this.state.selectedShipId];
+        const owner = this.state.countries[sh.countryId];
         const carried = getTotalSoldiers(sh.units);
+        const entries = getNonZeroUnits(sh.units);
+        const iconsHtml =
+          entries.length > 0
+            ? `<div class="unit-icon-grid" style="margin-top:6px">${entries
+                .map(([k, c]) => renderUnitIconCardHtml(k, c, owner?.color ?? '#3b82f6'))
+                .join('')}</div>`
+            : '';
         regEl.style.display = 'block';
-        regEl.innerHTML = `
-          <div><strong>⚓ Taşıma Gemisi</strong> (${this.state.countries[sh.countryId]?.name ?? '-'})</div>
+        const nextHtml = `
+          <div><strong>⚓ Taşıma Gemisi</strong> (${owner?.name ?? '-'})</div>
           <div><strong>Taşınan Asker:</strong> ${carried} (Kapasite: Sınırsız)</div>
-          <div class="muted">Kıyı bölgesine sol tıklayarak gönderin. Asker bindirmek için önce askere sonra gemiye tıklayın.</div>
+          ${iconsHtml}
+          <div class="muted" style="margin-top:4px">Kıyı bölgesine sol tıklayarak gönderin. Asker bindirmek için önce askere sonra gemiye tıklayın.</div>
         `;
+        if (regEl.dataset.sig !== `${sh.id}_${carried}`) {
+          regEl.dataset.sig = `${sh.id}_${carried}`;
+          regEl.innerHTML = nextHtml;
+        }
       } else {
         const reg = this.state.selectedRegionId ? this.state.regions[this.state.selectedRegionId] : null;
         if (!reg) {
           regEl.style.display = 'none';
+          regEl.dataset.sig = '';
         } else {
           regEl.style.display = 'block';
           const owner = this.state.countries[reg.ownerId];
           const bText = reg.building
             ? `${BUILDINGS[reg.building.type].name}${reg.building.type === 'combined' ? ` Lv.${reg.building.level}` : ''}${reg.building.constructing ? ` (%${Math.floor((reg.building.progressSec / Math.max(0.1, reg.building.totalSec)) * 100)})` : ''}`
             : 'Yok (Boş)';
-          regEl.innerHTML = `
-            <div><strong>Bölge:</strong> ${reg.id} (${owner?.name ?? '-'})</div>
-            <div><strong>Bina:</strong> ${bText}</div>
-            <div><strong>Durum:</strong> ${reg.biome} | ${reg.isCoastal ? '🌊 Kıyı' : '🏔️ Kara'}</div>
-          `;
+          const sig = `${reg.id}_${reg.ownerId}_${bText}`;
+          if (regEl.dataset.sig !== sig) {
+            regEl.dataset.sig = sig;
+            regEl.innerHTML = `
+              <div><strong>Bölge:</strong> ${reg.id} (${owner?.name ?? '-'})</div>
+              <div><strong>Bina:</strong> ${bText}</div>
+              <div><strong>Durum:</strong> ${reg.biome} | ${reg.isCoastal ? '🌊 Kıyı' : '🏔️ Kara'}</div>
+            `;
+          }
         }
       }
     }
@@ -334,6 +815,246 @@ export class GameUIController {
       .map((t) => `<div class="toast-item toast-${t.kind}">${t.message}</div>`)
       .join('');
     if (strip.innerHTML !== html) strip.innerHTML = html;
+  }
+
+  private syncEncounterOverlay(): void {
+    const host = document.getElementById('encounter-host');
+    if (!host) return;
+    const enc = this.state.activeEncounter;
+    if (!enc) {
+      if (this.mountedEncounterKey !== null || host.innerHTML !== '') {
+        this.mountedEncounterKey = null;
+        host.innerHTML = '';
+      }
+      return;
+    }
+
+    const pid = this.state.playerCountryId;
+    if (pid) {
+      enc.relation = getRelationStatus(this.state, pid, enc.otherCountryId);
+    }
+    const sig = `${enc.id}_${enc.activeTab}_${enc.relation}_${this.selectedDiplomacyCountryId ?? ''}`;
+    if (this.mountedEncounterKey === sig) return;
+    this.mountedEncounterKey = sig;
+    this.hideTooltip();
+    this.renderEncounterModal(host);
+  }
+
+  private renderEncounterModal(host: HTMLElement): void {
+    const enc = this.state.activeEncounter;
+    const pid = this.state.playerCountryId;
+    if (!enc || !pid) {
+      host.innerHTML = '';
+      return;
+    }
+
+    const myArmy = this.state.armies[enc.playerArmyId];
+    const otherArmy = this.state.armies[enc.otherArmyId];
+    const me = this.state.countries[pid];
+    const otherCountry = this.state.countries[enc.otherCountryId];
+    if (!myArmy || !otherArmy || !me || !otherCountry) {
+      resolveEncounterChoice(this.state, 'stand_down');
+      host.innerHTML = '';
+      return;
+    }
+
+    const relLabels = {
+      neutral: '⚪ Nötr',
+      allied: '🟢 Müttefik',
+      war: '🔴 Savaşta',
+    };
+
+    const myStats = computeArmyAverageStats(myArmy.units);
+    const otherStats = computeArmyAverageStats(otherArmy.units);
+    const myUnits = getNonZeroUnits(myArmy.units);
+    const otherUnits = getNonZeroUnits(otherArmy.units);
+
+    let bodyHtml = '';
+    if (enc.activeTab === 'encounter') {
+      const actionButtons =
+        enc.relation === 'war'
+          ? `
+            <button class="pixel-btn active-btn" data-enc-choice="attack">⚔️ Saldır / Çatışmaya Gir</button>
+            <button class="pixel-btn" data-enc-choice="stand_down">🏃 Dur / Geri Çekil</button>
+          `
+          : enc.relation === 'neutral'
+            ? `
+            <button class="pixel-btn" style="border-color:#ef4444;color:#fecaca" data-enc-choice="declare_war_attack">⚔️ Savaş İlan Et ve Saldır</button>
+            <button class="pixel-btn active-btn" data-enc-choice="stand_down">🛑 Saldırma / Dur</button>
+            <button class="pixel-btn" data-enc-choice="continue_pass">🕊️ Yanından Geç</button>
+          `
+            : `
+            <button class="pixel-btn active-btn" data-enc-choice="continue_pass">🤝 Müttefik — Yoluna Devam Et</button>
+            <button class="pixel-btn" data-enc-choice="stand_down">🛑 Burada Dur</button>
+          `;
+
+      bodyHtml = `
+        <div class="status-line">
+          🚨 <b>${me.name}</b> birlikleriniz, <b>${otherCountry.name}</b> ordusuyla karşılaştı!
+          Anlık İlişki: <b>${relLabels[enc.relation]}</b> — Oyun kararınız için duraklatıldı.
+        </div>
+        <div class="two-col">
+          <div class="army-vs-box">
+            <strong>★ Bizim Ordumuz (${me.name})</strong>
+            <div class="muted">Toplam: <b>${myStats.count} Asker</b> | Ort. Hasar: <b>${myStats.avgDamage.toFixed(1)}</b> | Ort. Koruma: <b>${myStats.avgDefense.toFixed(1)}</b></div>
+            <div class="unit-icon-grid">
+              ${myUnits.map(([k, c]) => renderUnitIconCardHtml(k, c, me.color)).join('')}
+            </div>
+          </div>
+          <div class="army-vs-box">
+            <strong>🚩 ${otherCountry.name} Ordusu</strong>
+            <div class="muted">Toplam: <b>${otherStats.count} Asker</b> | Ort. Hasar: <b>${otherStats.avgDamage.toFixed(1)}</b> | Ort. Koruma: <b>${otherStats.avgDefense.toFixed(1)}</b></div>
+            <div class="unit-icon-grid">
+              ${otherUnits.map(([k, c]) => renderUnitIconCardHtml(k, c, otherCountry.color)).join('')}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px">
+          ${actionButtons}
+        </div>
+      `;
+    } else {
+      // Diplomacy tab inside Encounter popup showing inter-country relations!
+      const activeCountries = Object.values(this.state.countries).filter((c) => !c.eliminated);
+      const others = activeCountries.filter((c) => c.id !== pid);
+      const focusDipId =
+        this.selectedDiplomacyCountryId && this.state.countries[this.selectedDiplomacyCountryId]
+          ? this.selectedDiplomacyCountryId
+          : otherCountry.id;
+      const dipTarget = this.state.countries[focusDipId] ?? otherCountry;
+      const dipEdge = getDiplomacyEdge(this.state, pid, dipTarget.id);
+
+      const getForeignRelationsSummary = (cid: string) => {
+        const wars: string[] = [];
+        const allies: string[] = [];
+        for (const other of activeCountries) {
+          if (other.id === cid) continue;
+          const st = getRelationStatus(this.state, cid, other.id);
+          if (st === 'war') wars.push(other.name);
+          else if (st === 'allied') allies.push(other.name);
+        }
+        return {
+          wars: wars.length > 0 ? wars.join(', ') : 'Yok',
+          allies: allies.length > 0 ? allies.join(', ') : 'Yok',
+        };
+      };
+
+      const relSummary = getForeignRelationsSummary(dipTarget.id);
+
+      bodyHtml = `
+        <div class="status-line">
+          📜 <b>Ülkeler Arası İlişkiler</b> — Karşılaştığınız <b>${otherCountry.name}</b> ve diğer devletlerin diplomatik durumu:
+        </div>
+        <div class="two-col">
+          <div class="branch-col" style="max-height:260px;overflow-y:auto">
+            ${others
+              .map((c) => {
+                const r = getRelationStatus(this.state, pid, c.id);
+                const mark = c.id === otherCountry.id ? '⚔️ ' : '';
+                return `
+                  <button class="pixel-btn ${c.id === dipTarget.id ? 'active-btn' : ''}" data-enc-dip="${c.id}" style="display:flex;justify-content:space-between">
+                    <span>${mark}${c.name}</span>
+                    <span>${relLabels[r]}</span>
+                  </button>
+                `;
+              })
+              .join('')}
+          </div>
+          <div class="army-vs-box">
+            <strong>${dipTarget.name} — Diplomatik Dosya</strong>
+            <div>Bizimle İlişki: <b>${relLabels[dipEdge?.status ?? 'neutral']} (${dipEdge?.score ?? 0})</b></div>
+            <div>Müttefikleri: <b>${relSummary.allies}</b></div>
+            <div>Savaşta Oldukları: <b>${relSummary.wars}</b></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              ${
+                dipEdge?.status !== 'war'
+                  ? `<button class="pixel-btn" id="btn-enc-dip-war">⚔️ Savaş İlan Et</button>`
+                  : `<button class="pixel-btn" id="btn-enc-dip-peace">🕊️ Barış Teklif Et</button>`
+              }
+              ${
+                dipEdge?.status === 'neutral'
+                  ? `<button class="pixel-btn" id="btn-enc-dip-ally">🤝 İttifak Teklif Et</button>`
+                  : ''
+              }
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    host.innerHTML = `
+      <div class="encounter-overlay">
+        <div class="pixel-panel modal-window">
+          <div class="modal-header">
+            <strong>⚔️ Ordu Karşılaşması — ${otherCountry.name}</strong>
+            <span class="badge">⏸ Oyun Duraklatıldı</span>
+          </div>
+          <div class="tab-strip">
+            <button class="pixel-btn ${enc.activeTab === 'encounter' ? 'active-btn' : ''}" data-enc-tab="encounter">
+              ⚔️ Karşılaşma & Kuvvetler
+            </button>
+            <button class="pixel-btn ${enc.activeTab === 'diplomacy' ? 'active-btn' : ''}" data-enc-tab="diplomacy">
+              📜 Diplomasi
+            </button>
+          </div>
+          ${this.lastErrorMsg ? `<div class="err-line">${this.lastErrorMsg}</div>` : ''}
+          ${bodyHtml}
+        </div>
+      </div>
+    `;
+
+    host.querySelectorAll<HTMLButtonElement>('[data-enc-tab]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (!this.state.activeEncounter) return;
+        this.state.activeEncounter.activeTab = btn.dataset.encTab as 'encounter' | 'diplomacy';
+        this.lastErrorMsg = '';
+        this.mountedEncounterKey = null;
+        this.syncEncounterOverlay();
+      });
+    });
+
+    host.querySelectorAll<HTMLButtonElement>('[data-enc-choice]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const ch = btn.dataset.encChoice as EncounterChoice;
+        resolveEncounterChoice(this.state, ch);
+        this.lastErrorMsg = '';
+        this.mountedEncounterKey = null;
+        this.hideTooltip();
+        this.syncEncounterOverlay();
+        this.updateLiveHUD();
+      });
+    });
+
+    host.querySelectorAll<HTMLButtonElement>('[data-enc-dip]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.selectedDiplomacyCountryId = btn.dataset.encDip || null;
+        this.mountedEncounterKey = null;
+        this.syncEncounterOverlay();
+      });
+    });
+
+    const focusDipId =
+      this.selectedDiplomacyCountryId && this.state.countries[this.selectedDiplomacyCountryId]
+        ? this.selectedDiplomacyCountryId
+        : otherCountry.id;
+
+    host.querySelector('#btn-enc-dip-war')?.addEventListener('click', () => {
+      declareWar(this.state, pid, focusDipId);
+      this.mountedEncounterKey = null;
+      this.syncEncounterOverlay();
+    });
+    host.querySelector('#btn-enc-dip-ally')?.addEventListener('click', () => {
+      const res = proposeAlliance(this.state, pid, focusDipId);
+      this.lastErrorMsg = !res.accepted ? 'İttifak teklifi reddedildi.' : '';
+      this.mountedEncounterKey = null;
+      this.syncEncounterOverlay();
+    });
+    host.querySelector('#btn-enc-dip-peace')?.addEventListener('click', () => {
+      const res = proposePeace(this.state, pid, focusDipId);
+      this.lastErrorMsg = !res.accepted ? 'Barış teklifi reddedildi.' : '';
+      this.mountedEncounterKey = null;
+      this.syncEncounterOverlay();
+    });
   }
 
   private updateLiveProgressInsideModal(): void {
@@ -355,9 +1076,10 @@ export class GameUIController {
           p.activeResearch.branch === 'weapon'
             ? WEAPONS[p.activeResearch.targetId as WeaponId].name
             : SHIELDS[p.activeResearch.targetId as Exclude<ShieldId, 'none'>].name;
-        liveBox.textContent = `Araştırılıyor: ${name} (%${pct})`;
+        liveBox.textContent = `🔬 Araştırılıyor: ${name} (%${pct})`;
       } else {
-        liveBox.textContent = 'Aktif araştırma yok.';
+        liveBox.textContent =
+          'Aktif araştırma yok — Ağaçtaki sarı çerçeveli sıradaki ikona tıklayarak araştırma başlatın (İkonların üstüne gelince statlar görünür).';
       }
     } else if (this.activeWindow === 'factory') {
       const q = p.productionQueue[0];
@@ -405,32 +1127,25 @@ export class GameUIController {
             <button class="pixel-btn close-win">✕</button>
           </div>
           ${errHtml}
-          <div class="muted" style="margin-bottom:8px">
-            ${isMine ? 'Haritada hedef bölgeye, düşman ordusuna veya dost gemiye sol tıklayarak gönderebilirsiniz (Sağ tık = İptal).' : 'Yabancı ordu kümesi.'}
+          <div class="muted" style="margin-bottom:10px">
+            Birlik ikonlarının üstüne fare tutarak sayı, silah ve kalkan statlarını inceleyebilirsiniz.
+            ${isMine ? ' Haritada hedefe sol tıklayarak yürüyüş emri verin (Sağ tık = İptal).' : ''}
           </div>
-          <div class="card-list">
+          <div class="unit-icon-grid">
             ${entries
-              .map(
-                ([key, cnt]) => `
-                <div class="card-row">
-                  <span><b>${formatUnitKeyLabel(key)}</b></span>
-                  <div style="display:flex;align-items:center;gap:10px">
-                    <span class="badge">${cnt} asker</span>
-                    ${
-                      isMine && total > 1
-                        ? `<label>Ayır: <input class="pixel-input split-input" data-unit="${key}" type="number" min="0" max="${cnt}" value="0" style="width:68px" /></label>`
-                        : ''
-                    }
-                  </div>
-                </div>
-              `,
-              )
+              .map(([key, cnt]) => {
+                const splitHtml =
+                  isMine && total > 1
+                    ? `<label style="font-size:10px;margin-top:2px">Ayır: <input class="pixel-input split-input" data-unit="${key}" type="number" min="0" max="${cnt}" value="0" style="width:54px;padding:2px 4px" /></label>`
+                    : '';
+                return renderUnitIconCardHtml(key, cnt, owner?.color ?? '#3b82f6', splitHtml);
+              })
               .join('')}
           </div>
           ${
             isMine
               ? `
-            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
               ${
                 total > 1
                   ? `<button class="pixel-btn" id="btn-split-army">✂️ Belirtilen Sayılarla Ayır</button>`
@@ -473,7 +1188,11 @@ export class GameUIController {
 
     if (this.activeWindow === 'diplomacy') {
       const others = Object.values(this.state.countries).filter((c) => c.id !== pid && !c.eliminated);
-      if (!this.selectedDiplomacyCountryId || !this.state.countries[this.selectedDiplomacyCountryId] || this.state.countries[this.selectedDiplomacyCountryId].eliminated) {
+      if (
+        !this.selectedDiplomacyCountryId ||
+        !this.state.countries[this.selectedDiplomacyCountryId] ||
+        this.state.countries[this.selectedDiplomacyCountryId].eliminated
+      ) {
         this.selectedDiplomacyCountryId = others[0]?.id ?? null;
       }
       const target = this.selectedDiplomacyCountryId
@@ -576,13 +1295,7 @@ export class GameUIController {
 
     if (this.activeWindow === 'buildings') {
       const owned = getCountryRegions(this.state, pid);
-      const selectedReg =
-        (this.state.selectedRegionId &&
-        this.state.regions[this.state.selectedRegionId]?.ownerId === pid
-          ? this.state.regions[this.state.selectedRegionId]
-          : null) ??
-        owned.find((r) => !r.building) ??
-        owned[0];
+      const hasCoastal = owned.some((r) => r.isCoastal);
 
       const buildTypes: Exclude<BuildingType, 'combined'>[] = [
         'barracks',
@@ -595,14 +1308,14 @@ export class GameUIController {
 
       const smallUpgradeSection = p.isSmallCountry
         ? (() => {
-            const compReg = owned.find((r) => r.building?.type === 'combined') ?? selectedReg;
+            const compReg = owned.find((r) => r.building?.type === 'combined') ?? owned[0];
             const curLv = compReg?.building?.type === 'combined' ? compReg.building.level : 0;
             const nextCost = curLv === 0 ? BUILDINGS.combined.cost : COMBINED_UPGRADE_COSTS[curLv + 1];
             return `
               <div class="card-row highlight-row">
                 <div>
                   <strong>🏛️ Merkez Kompleks (Küçük Ülke Birleşik Bina)</strong>
-                  <div class="muted">Mevcut Seviye: ${curLv}/3 — Tüm 5 binanın (kıyıysa Liman dahil) işlevini tek bölgede toplar.</div>
+                  <div class="muted">Mevcut Seviye: ${curLv}/3 — Tüm 5 binanın (kıyıysa Liman dahil) işlevini tek merkezde toplar.</div>
                 </div>
                 ${
                   nextCost
@@ -617,13 +1330,12 @@ export class GameUIController {
       host.innerHTML = `
         <div class="pixel-panel modal-window">
           <div class="modal-header">
-            <strong>🏗️ Satın Alma & Binalar</strong>
+            <strong>🏗️ Satın Alma & Fareyle Bina Yerleştirme</strong>
             <button class="pixel-btn close-win">✕</button>
           </div>
           ${errHtml}
-          <div class="muted" style="margin-bottom:8px">
-            Seçili Bölge: <b>${selectedReg ? `${selectedReg.id} ${selectedReg.isCoastal ? '(🌊 Kıyı)' : '(Kara)'}` : 'Yok'}</b>
-            — Haritadan kendi boş bölgenize tıklayarak hedef bölgeyi değiştirebilirsiniz.
+          <div class="status-line">
+            🖱️ Kurmak istediğiniz binayı seçin → <b>Oyun otomatik duraklatılır</b> ve binayı haritada fareyle tam istediğiniz noktaya sol tıklayarak yerleştirirsiniz (Sağ tık = İptal).
           </div>
           ${smallUpgradeSection}
           <div class="card-list">
@@ -631,15 +1343,15 @@ export class GameUIController {
               .map((bt) => {
                 const spec = BUILDINGS[bt];
                 const count = getEffectiveBuildingCount(this.state, pid, bt);
-                const disabledCoast = bt === 'port' && (!selectedReg || !selectedReg.isCoastal);
+                const disabledCoast = bt === 'port' && !hasCoastal;
                 return `
                   <div class="card-row">
                     <div>
                       <strong>${spec.name}</strong> <span class="badge">Aktif: ${count}</span>
                       <div class="muted">${spec.description} (${spec.buildSec} sn)</div>
                     </div>
-                    <button class="pixel-btn btn-build" data-type="${bt}" data-reg="${selectedReg?.id ?? ''}" ${disabledCoast ? 'disabled' : ''}>
-                      İnşa Et (${spec.cost}💰)
+                    <button class="pixel-btn btn-place-building" data-type="${bt}" ${disabledCoast ? 'disabled' : ''}>
+                      🖱️ Haritaya Yerleştir (${spec.cost}💰)
                     </button>
                   </div>
                 `;
@@ -656,13 +1368,15 @@ export class GameUIController {
         this.lastErrorMsg = res.ok ? '' : res.error || '';
         this.renderModal();
       });
-      host.querySelectorAll<HTMLButtonElement>('.btn-build').forEach((btn) => {
+      host.querySelectorAll<HTMLButtonElement>('.btn-place-building').forEach((btn) => {
         btn.addEventListener('click', () => {
           const bt = btn.dataset.type as Exclude<BuildingType, 'combined'>;
-          const regId = btn.dataset.reg || '';
-          const res = startBuildingConstruction(this.state, pid, regId, bt);
-          this.lastErrorMsg = res.ok ? '' : res.error || '';
-          this.renderModal();
+          if (p.money < BUILDINGS[bt].cost) {
+            this.lastErrorMsg = `Yetersiz para (${BUILDINGS[bt].cost} gerekli).`;
+            this.renderModal();
+            return;
+          }
+          this.callbacks.onEnterBuildingPlacement(bt);
         });
       });
       return;
@@ -671,68 +1385,133 @@ export class GameUIController {
     if (this.activeWindow === 'science') {
       const nextW = WEAPON_ORDER.find((w) => !p.unlockedWeapons.includes(w));
       const nextS = SHIELD_ORDER.find((s) => !p.unlockedShields.includes(s));
+      const rootUri = getTechItemSpriteDataUri('root', 'base');
+      const rootTip = escapeAttr(
+        'Temel Bilim Başlangıç Noktası\nÜst çizgi: Silah Dalı (Saldırı Hasarı)\nAlt çizgi: Kalkan Dalı (Savunma Koruması)',
+      );
+
+      const renderWeaponBranch = WEAPON_ORDER.map((w, idx) => {
+        const sp = WEAPONS[w];
+        const unlocked = p.unlockedWeapons.includes(w);
+        const isResearching =
+          p.activeResearch?.branch === 'weapon' && p.activeResearch.targetId === w;
+        const isNext = w === nextW && !isResearching;
+        const cls = unlocked
+          ? 'node-unlocked'
+          : isResearching
+            ? 'node-researching'
+            : isNext
+              ? 'node-next'
+              : 'node-locked';
+        const costLabel = unlocked
+          ? '✓ Açık'
+          : isResearching
+            ? `${sp.researchCost} 💰 (⏳)`
+            : `${sp.researchCost} 💰`;
+        const statusStr = unlocked
+          ? 'Açık (Fabrikada üretilebilir)'
+          : isResearching
+            ? 'Şu an araştırılıyor'
+            : isNext
+              ? 'Tıkla: Araştırmayı Başlat'
+              : 'Önceki kademe gerekli';
+        const tip = escapeAttr(
+          `T${sp.tier} ${sp.name}\nHasar: ${sp.damage}\nAraştırma: ${sp.researchCost} Para / ${sp.researchSec} sn\nFabrika Üretimi: ${sp.prodCost} Para / ${sp.prodSec} sn\nDurum: ${statusStr}`,
+        );
+        const edgeCls = unlocked ? 'edge-unlocked' : isResearching ? 'edge-active' : '';
+        const edgeHtml = idx > 0 ? `<div class="tech-edge ${edgeCls}"></div>` : '';
+        const iconUri = getTechItemSpriteDataUri('weapon', w);
+        return `
+          ${edgeHtml}
+          <button class="tech-tree-node ${cls}" data-tech-branch="weapon" data-tech-id="${w}" data-tech-next="${isNext ? '1' : '0'}" data-hover-tip="${tip}">
+            <img src="${iconUri}" alt="${sp.name}" />
+            <span class="node-title">${sp.name}</span>
+            <span class="node-cost">${costLabel}</span>
+          </button>
+        `;
+      }).join('');
+
+      const renderShieldBranch = SHIELD_ORDER.map((s, idx) => {
+        const sp = SHIELDS[s];
+        const unlocked = p.unlockedShields.includes(s);
+        const isResearching =
+          p.activeResearch?.branch === 'shield' && p.activeResearch.targetId === s;
+        const isNext = s === nextS && !isResearching;
+        const cls = unlocked
+          ? 'node-unlocked'
+          : isResearching
+            ? 'node-researching'
+            : isNext
+              ? 'node-next'
+              : 'node-locked';
+        const costLabel = unlocked
+          ? '✓ Açık'
+          : isResearching
+            ? `${sp.researchCost} 💰 (⏳)`
+            : `${sp.researchCost} 💰`;
+        const statusStr = unlocked
+          ? 'Açık (Fabrikada üretilebilir)'
+          : isResearching
+            ? 'Şu an araştırılıyor'
+            : isNext
+              ? 'Tıkla: Araştırmayı Başlat'
+              : 'Önceki kademe gerekli';
+        const tip = escapeAttr(
+          `T${sp.tier} ${sp.name}\nKoruma: ${sp.defense}\nAraştırma: ${sp.researchCost} Para / ${sp.researchSec} sn\nFabrika Üretimi: ${sp.prodCost} Para / ${sp.prodSec} sn\nDurum: ${statusStr}`,
+        );
+        const edgeCls = unlocked ? 'edge-unlocked' : isResearching ? 'edge-active' : '';
+        const edgeHtml = idx > 0 ? `<div class="tech-edge ${edgeCls}"></div>` : '';
+        const iconUri = getTechItemSpriteDataUri('shield', s);
+        return `
+          ${edgeHtml}
+          <button class="tech-tree-node ${cls}" data-tech-branch="shield" data-tech-id="${s}" data-tech-next="${isNext ? '1' : '0'}" data-hover-tip="${tip}">
+            <img src="${iconUri}" alt="${sp.name}" />
+            <span class="node-title">${sp.name}</span>
+            <span class="node-cost">${costLabel}</span>
+          </button>
+        `;
+      }).join('');
+
       host.innerHTML = `
         <div class="pixel-panel modal-window">
           <div class="modal-header">
-            <strong>🔬 Üniversite — Gelişim Ağacı</strong>
+            <strong>🔬 Üniversite — Görsel Bilim Ağacı</strong>
             <button class="pixel-btn close-win">✕</button>
           </div>
           ${errHtml}
           <div id="modal-live-status" class="status-line"></div>
-          <div class="two-col">
-            <div class="branch-col">
-              <h4>⚔️ Saldırı Dalı (Hasar)</h4>
-              ${WEAPON_ORDER.map((w) => {
-                const sp = WEAPONS[w];
-                const unlocked = p.unlockedWeapons.includes(w);
-                const isNext = w === nextW;
-                return `
-                  <div class="tech-node ${unlocked ? 'tech-unlocked' : ''}">
-                    <div><b>T${sp.tier} ${sp.name}</b> — Hasar: ${sp.damage}</div>
-                    ${
-                      unlocked
-                        ? '<span class="badge">Açık</span>'
-                        : isNext
-                          ? `<button class="pixel-btn" id="btn-res-weapon">Araştır (${sp.researchCost}💰 / ${sp.researchSec}sn)</button>`
-                          : '<span class="muted">Kilitli</span>'
-                    }
-                  </div>
-                `;
-              }).join('')}
+          <div class="science-tree-wrap">
+            <div class="science-root-box" data-hover-tip="${rootTip}">
+              <img src="${rootUri}" style="width:44px;height:44px;image-rendering:pixelated" alt="Başlangıç" />
+              <strong style="font-size:11px">Temel Bilim</strong>
+              <span class="badge">Başlangıç</span>
             </div>
-            <div class="branch-col">
-              <h4>🛡️ Savunma Dalı (Koruma)</h4>
-              ${SHIELD_ORDER.map((s) => {
-                const sp = SHIELDS[s];
-                const unlocked = p.unlockedShields.includes(s);
-                const isNext = s === nextS;
-                return `
-                  <div class="tech-node ${unlocked ? 'tech-unlocked' : ''}">
-                    <div><b>T${sp.tier} ${sp.name}</b> — Koruma: ${sp.defense}</div>
-                    ${
-                      unlocked
-                        ? '<span class="badge">Açık</span>'
-                        : isNext
-                          ? `<button class="pixel-btn" id="btn-res-shield">Araştır (${sp.researchCost}💰 / ${sp.researchSec}sn)</button>`
-                          : '<span class="muted">Kilitli</span>'
-                    }
-                  </div>
-                `;
-              }).join('')}
+            <svg class="science-fork-svg" width="52" height="176" viewBox="0 0 52 176">
+              <path d="M 0 88 L 22 88 L 22 38 L 52 38" fill="none" stroke="#22c55e" stroke-width="4" />
+              <path d="M 0 88 L 22 88 L 22 138 L 52 138" fill="none" stroke="#38bdf8" stroke-width="4" />
+            </svg>
+            <div class="science-branches">
+              <div class="science-branch-row">
+                <span class="science-branch-tag">⚔️ Silahlar</span>
+                ${renderWeaponBranch}
+              </div>
+              <div class="science-branch-row">
+                <span class="science-branch-tag">🛡️ Kalkanlar</span>
+                ${renderShieldBranch}
+              </div>
             </div>
           </div>
         </div>
       `;
+
       host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
-      host.querySelector('#btn-res-weapon')?.addEventListener('click', () => {
-        const res = startTechResearch(this.state, pid, 'weapon');
-        this.lastErrorMsg = res.ok ? '' : res.error || '';
-        this.renderModal();
-      });
-      host.querySelector('#btn-res-shield')?.addEventListener('click', () => {
-        const res = startTechResearch(this.state, pid, 'shield');
-        this.lastErrorMsg = res.ok ? '' : res.error || '';
-        this.renderModal();
+      host.querySelectorAll<HTMLButtonElement>('[data-tech-next="1"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const branch = btn.dataset.techBranch as 'weapon' | 'shield';
+          const res = startTechResearch(this.state, pid, branch);
+          this.lastErrorMsg = res.ok ? '' : res.error || '';
+          this.renderModal();
+        });
       });
       this.updateLiveProgressInsideModal();
       return;
@@ -758,7 +1537,10 @@ export class GameUIController {
                   const sp = WEAPONS[w];
                   return `
                     <div class="card-row">
-                      <span><b>${sp.name}</b> (Hasar ${sp.damage}, ${sp.prodCost}💰/ad)</span>
+                      <span style="display:flex;align-items:center;gap:6px">
+                        <img src="${getTechItemSpriteDataUri('weapon', w)}" style="width:24px;height:24px" alt="" />
+                        <b>${sp.name}</b> (Hasar ${sp.damage}, ${sp.prodCost}💰/ad)
+                      </span>
                       <button class="pixel-btn btn-prod" data-cat="weapon" data-id="${w}">Üret</button>
                     </div>
                   `;
@@ -772,7 +1554,10 @@ export class GameUIController {
                   const sp = SHIELDS[s];
                   return `
                     <div class="card-row">
-                      <span><b>${sp.name}</b> (Koruma ${sp.defense}, ${sp.prodCost}💰/ad)</span>
+                      <span style="display:flex;align-items:center;gap:6px">
+                        <img src="${getTechItemSpriteDataUri('shield', s)}" style="width:24px;height:24px" alt="" />
+                        <b>${sp.name}</b> (Koruma ${sp.defense}, ${sp.prodCost}💰/ad)
+                      </span>
                       <button class="pixel-btn btn-prod" data-cat="shield" data-id="${s}">Üret</button>
                     </div>
                   `;
@@ -858,12 +1643,15 @@ export class GameUIController {
     if (this.activeWindow === 'settings') {
       const volPct = Math.round(this.music.getVolume() * 100);
       const muted = this.music.isMuted();
+      const specs = this.keyBindings.getAllSpecsWithCurrentKeys();
+
       host.innerHTML = `
         <div class="pixel-panel modal-window">
           <div class="modal-header">
-            <strong>🎵 Ayarlar — Müzik & Kontroller</strong>
+            <strong>⚙️ Ayarlar — Müzik & Tuş Atama (Key Bindings)</strong>
             <button class="pixel-btn close-win">✕</button>
           </div>
+          ${errHtml}
           <div class="card-list">
             <div class="card-row">
               <label for="music-vol-slider"><strong>Arka Plan Müziği Ses Seviyesi:</strong> <span id="music-vol-label">%${volPct}</span></label>
@@ -873,12 +1661,33 @@ export class GameUIController {
               <span><strong>Müzik Durumu:</strong> ${muted ? '🔇 Susturuldu' : '🔊 Açık'}</span>
               <button class="pixel-btn" id="btn-music-mute">${muted ? '🔊 Sesi Aç' : '🔇 Sustur (Mute)'}</button>
             </div>
-            <div class="muted" style="margin-top:6px">
-              Kontroller: Sol tık ordu/bölge seç & gönder | Sağ tık veya harita dışı tık: gönderme iptal | Asker → Gemi tıkla: gemiye bindir | Space: Durdur / Devam Et.
-            </div>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+            <strong>⌨️ Klavye Kısayolları (Değiştirmek için tuş kutusuna tıklayın)</strong>
+            <button class="pixel-btn" id="btn-reset-keys">↺ Varsayılanlara Sıfırla</button>
+          </div>
+          <div class="keybind-grid">
+            ${specs
+              .map((sp) => {
+                const isListening = this.listeningKeyAction === sp.id;
+                return `
+                  <div class="keybind-row">
+                    <span>${sp.label}</span>
+                    <button class="pixel-btn ${isListening ? 'active-btn' : ''}" data-rebind-action="${sp.id}">
+                      ${isListening ? 'Tuşa basın...' : `[${sp.displayKey}]`}
+                    </button>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+          <div class="muted" style="margin-top:8px">
+            Not: Tarayıcı tam ekran çakışması nedeniyle <code>Esc</code> tuşu atanamaz. Kısayol atanmış butonların üstüne fareyle geldiğinizde güncel tuş otomatik olarak gösterilir.
           </div>
         </div>
       `;
+
       host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
       const slider = host.querySelector('#music-vol-slider') as HTMLInputElement | null;
       slider?.addEventListener('input', () => {
@@ -892,6 +1701,20 @@ export class GameUIController {
         this.music.ensureStarted();
         this.music.toggleMute();
         this.renderModal();
+      });
+      host.querySelector('#btn-reset-keys')?.addEventListener('click', () => {
+        this.listeningKeyAction = null;
+        this.lastErrorMsg = '';
+        this.keyBindings.resetDefaults();
+        this.renderModal();
+      });
+      host.querySelectorAll<HTMLButtonElement>('[data-rebind-action]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const act = btn.dataset.rebindAction as KeyActionId;
+          this.listeningKeyAction = this.listeningKeyAction === act ? null : act;
+          this.lastErrorMsg = '';
+          this.renderModal();
+        });
       });
     }
   }

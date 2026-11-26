@@ -1,7 +1,7 @@
 # Pixel World (GeoGame) — Güncelleme Tasarım Dokümanı (UPDATE_DESIGN.md)
 
 > Bu doküman, [DESIGN.md](DESIGN.md) temel sürümünden (Faz 1–5) sonra planlanan **Oynanış, Görsellik, Kontrol ve UX Güncellemesi (v1.1)** kararlarını toplar.
-> **Durum:** Kesinleşti *(henüz kodlanmadı — onay/komut verildiğinde uygulamaya geçilecek)*.
+> **Durum:** Tamamlandı & Tarayıcıda Doğrulandı *(Aşama 1–4 eksiksiz uygulandı; bkz. [UPDATE_PROGRESS.md](UPDATE_PROGRESS.md))*.
 
 ---
 
