@@ -11,7 +11,6 @@ import {
   queueBarracksTraining,
   queueFactoryProduction,
   startBuildingConstruction,
-  startCombinedBuildingUpgrade,
   startTechResearch,
   tickEconomyAndQueues,
 } from '../src/sim/economy';
@@ -119,26 +118,11 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     expect(state.toasts.length).toBe(toastCountBeforeRoutine);
   });
 
-  it('küçük ülkelerde Birleşik Bina yükseltmesini ve Tier 2 bilim başlangıcını destekler', () => {
+  it('kompakt bölge boyutuyla orta ölçekli ülkelerde (Yunanistan) çoklu bağımsız bina alanı sağlar', () => {
+    const greece = worldCountries.find((c) => c.name === 'Greece')!;
     const state = createInitialGameState();
-    const vatican = worldCountries.find((c) => c.name === 'Vatican')!;
-    startGameWithCountry(state, vatican.id, worldCountries);
-    const p = state.countries[vatican.id];
-    p.money = 1000;
-
-    expect(p.isSmallCountry).toBe(true);
-    expect(p.unlockedWeapons).toEqual(['sword', 'spear']);
-    expect(p.unlockedShields).toEqual(['wood', 'bronze']);
-
-    const reg = getCountryRegions(state, vatican.id)[0];
-    expect(reg.building?.type).toBe('combined');
-    expect(reg.building?.level).toBe(1);
-
-    // Tek birleşik binayla hem Fabrika hem Üniversite hem Kışla çalışır; ayrıca Lv.2 yükseltilebilir
-    expect(startCombinedBuildingUpgrade(state, vatican.id, reg.id).ok).toBe(true);
-    tickEconomyAndQueues(state, 7);
-    expect(reg.building?.level).toBe(2);
-    expect(reg.building?.constructing).toBe(false);
-    expect(getCountryMoneyPerSec(state, vatican.id)).toBe(5 + 24);
+    startGameWithCountry(state, greece.id, worldCountries);
+    const owned = getCountryRegions(state, greece.id);
+    expect(owned.length).toBeGreaterThanOrEqual(6);
   });
 });

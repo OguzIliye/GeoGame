@@ -164,7 +164,7 @@ function drawSpansWorldScaled(
 ): void {
   const ox = Math.round(sx);
   const oy = Math.round(sy);
-  const S = Math.max(0.75, pixelScale);
+  const S = Math.max(0.55, pixelScale);
 
   for (let i = 0; i < spans.length; i++) {
     const sp = spans[i];
@@ -190,9 +190,9 @@ function spansToSvgDataUri(spans: PixelSpan[], gridW: number, gridH: number, ox:
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-/** Compute world-space pixel step so zooming in scales buildings & soldiers smoothly with the map! */
+/** Compute world-space pixel step (~30% more compact in v1.2) so all map objects fit compact regions cleanly while zooming crisply! */
 export function computeWorldSpritePixelStep(cameraScale = 36): number {
-  return Math.max(0.85, cameraScale / 18);
+  return Math.max(0.55, cameraScale / 26);
 }
 
 function pRect(
@@ -222,7 +222,7 @@ export function drawPixelTerrainProp(
   scale: number,
   realTimeMs: number,
 ): void {
-  const S = Math.max(0.75, scale / 22);
+  const S = Math.max(0.55, scale / 31);
   const ox = Math.round(sx);
   const oy = Math.round(sy);
 
@@ -441,40 +441,23 @@ function buildBuildingSpans(
     return g.toSpans();
   }
 
-  if (type === 'port') {
-    // Timber pier pilings + wooden deck + lighthouse + crane
-    g.rect(-11, 3, 22, 3, '#78350f');
-    g.rect(-11, 3, 22, 1, '#b45309');
-    for (const px of [-9, -4, 1, 6, 9]) {
-      g.rect(px, 6, 2, 2, '#451a03');
-    }
-    // Lighthouse tower on left
-    g.rect(-8, -9, 5, 12, '#f8fafc');
-    g.rect(-8, -6, 5, 3, ownerColor);
-    g.rect(-8, -2, 5, 2, '#ef4444');
-    g.rect(-9, -11, 7, 2, '#334155');
-    g.rect(-7, -13, 3, 2, active && frame % 2 === 0 ? '#fde047' : '#bae6fd');
-    // Harbor crane & cargo crate on right
-    g.rect(3, -8, 2, 11, '#b45309');
-    g.rect(3, -8, 7, 2, '#d97706');
-    g.rect(8, -6, 1, 4, '#94a3b8');
-    g.rect(6, -2, 4, 4, ownerColor);
-    g.applyCountryOutline(ownerColor);
-    return g.toSpans();
+  // 'port' — Timber pier pilings + wooden deck + lighthouse + crane
+  g.rect(-11, 3, 22, 3, '#78350f');
+  g.rect(-11, 3, 22, 1, '#b45309');
+  for (const px of [-9, -4, 1, 6, 9]) {
+    g.rect(px, 6, 2, 2, '#451a03');
   }
-
-  // 'combined' — Small-country Grand Royal Citadel (always active!)
-  g.rect(-12, 4, 24, 3, '#334155');
-  g.rect(-11, -3, 22, 7, '#475569');
-  g.rect(-12, -6, 5, 9, '#64748b');
-  g.rect(7, -6, 5, 9, '#64748b');
-  g.rect(-8, -8, 16, 5, ownerColor);
-  g.rect(-5, -11, 10, 3, lightOwner);
-  g.rect(-3, -14, 6, 3, '#eab308');
-  g.rect(-1, -17, 2, 3, '#fde047');
-  g.rect(-7, -1, 3, 4, frame % 2 === 0 ? '#fde047' : '#fb923c');
-  g.rect(4, -1, 3, 4, frame % 2 === 0 ? '#38bdf8' : '#fde047');
-  g.rect(-2, 0, 4, 5, '#eab308');
+  // Lighthouse tower on left
+  g.rect(-8, -9, 5, 12, '#f8fafc');
+  g.rect(-8, -6, 5, 3, ownerColor);
+  g.rect(-8, -2, 5, 2, '#ef4444');
+  g.rect(-9, -11, 7, 2, '#334155');
+  g.rect(-7, -13, 3, 2, active && frame % 2 === 0 ? '#fde047' : '#bae6fd');
+  // Harbor crane & cargo crate on right
+  g.rect(3, -8, 2, 11, '#b45309');
+  g.rect(3, -8, 7, 2, '#d97706');
+  g.rect(8, -6, 1, 4, '#94a3b8');
+  g.rect(6, -2, 4, 4, ownerColor);
   g.applyCountryOutline(ownerColor);
   return g.toSpans();
 }
@@ -494,8 +477,7 @@ export function drawPixelBuilding(
   const S = computeWorldSpritePixelStep(cameraScale);
   const ox = Math.round(sx);
   const oy = Math.round(sy);
-  const active =
-    constructing ? false : type === 'bank' || type === 'combined' ? true : isWorking;
+  const active = constructing ? false : type === 'bank' ? true : isWorking;
   const frame = Math.floor(realTimeMs / 260) % 4;
 
   // Ground shadow
@@ -730,6 +712,42 @@ export function drawPixelTransportShip(
   }
 }
 
+/** Generate crisp SVG data-URI icon for any BuildingType (Shop, Building Popups, Quick Build, Live Strip)! */
+export function getBuildingSpriteDataUri(type: BuildingType, ownerColor = '#3b82f6'): string {
+  const cacheKey = `bicon_${type}_${ownerColor}`;
+  const hit = svgUriCache.get(cacheKey);
+  if (hit) return hit;
+
+  const spans = buildBuildingSpans(type, ownerColor, true, false, 0);
+  const uri = spansToSvgDataUri(spans, 34, 32, 17, 22);
+  svgUriCache.set(cacheKey, uri);
+  return uri;
+}
+
+/** Generate crisp SVG pixel-art banner/flag icon in a country's color (Diplomacy, Save/Continue, Standings)! */
+export function getCountryFlagDataUri(ownerColor = '#3b82f6'): string {
+  const cacheKey = `ficon_${ownerColor}`;
+  const hit = svgUriCache.get(cacheKey);
+  if (hit) return hit;
+
+  const g = new PixelGrid(22, 22, 11, 11);
+  const light = brightenHex(ownerColor, 0.28);
+  const dark = darkenHex(ownerColor, 0.28);
+  // Flagpole + golden finial
+  g.rect(-7, -8, 2, 17, '#cbd5e1');
+  g.rect(-8, -9, 4, 2, '#facc15');
+  // Waving banner cloth
+  g.rect(-5, -7, 8, 9, ownerColor);
+  g.rect(-5, -7, 8, 2, light);
+  g.rect(3, -6, 5, 9, dark);
+  g.rect(3, -6, 5, 2, ownerColor);
+  g.applyCountryOutline(ownerColor);
+
+  const uri = spansToSvgDataUri(g.toSpans(), 22, 22, 11, 11);
+  svgUriCache.set(cacheKey, uri);
+  return uri;
+}
+
 /** Generate crisp SVG data-URI icon for a specific (Weapon + Shield) unit card! */
 export function getUnitSpriteDataUri(
   weapon: WeaponId,
@@ -930,8 +948,8 @@ export function renderMainMenuPixelScene(
   ctx.fillRect(Math.round(cx - platW * 0.5 - 4), stageY + 4, platW + 8, 4);
 
   // Decorative background trees on the diorama
-  drawPixelTerrainProp(ctx, { kind: 'tree', x: 0, y: 0, variant: 0 }, cx - 150, stageY + 4, 88, realTimeMs);
-  drawPixelTerrainProp(ctx, { kind: 'mountain', x: 0, y: 0, variant: 1 }, cx + 150, stageY + 4, 82, realTimeMs);
+  drawPixelTerrainProp(ctx, { kind: 'tree', x: 0, y: 0, variant: 0 }, cx - 150, stageY + 4, 126, realTimeMs);
+  drawPixelTerrainProp(ctx, { kind: 'mountain', x: 0, y: 0, variant: 1 }, cx + 150, stageY + 4, 118, realTimeMs);
 
   // 1. Pixel-Art Title Logo at Top: "PIXEL WORLD"
   const logoPixelSize = Math.max(5, Math.min(10, Math.floor(viewW / 120)));
@@ -939,7 +957,7 @@ export function renderMainMenuPixelScene(
   drawPixelBlockText(ctx, 'PIXEL WORLD', cx, titleY, logoPixelSize);
 
   // 2. Animated Detailed Bank Building (Left of center)
-  drawPixelBuilding(ctx, 'bank', cx - 68, stageY - 12, '#3b82f6', true, false, 1, realTimeMs, 92);
+  drawPixelBuilding(ctx, 'bank', cx - 68, stageY - 12, '#3b82f6', true, false, 1, realTimeMs, 132);
 
   // 3. Detailed Bazooka-Holding Soldier with Country Outline (Right of center)
   const demoCombat = Math.floor(realTimeMs / 2400) % 3 === 2;
@@ -953,6 +971,6 @@ export function renderMainMenuPixelScene(
     true,
     '#3b82f6',
     realTimeMs,
-    96,
+    138,
   );
 }

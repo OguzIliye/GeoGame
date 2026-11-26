@@ -104,7 +104,7 @@ describe('Faz 3 — Ordu Kümeleri, Savaş, Hastane & Liman', () => {
       totalSec: 0,
     };
     for (const r of getCountryRegions(state, enemyId)) {
-      if (r.building?.type === 'hospital' || r.building?.type === 'combined') {
+      if (r.building?.type === 'hospital') {
         r.building = null;
       }
     }

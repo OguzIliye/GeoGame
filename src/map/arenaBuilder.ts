@@ -223,6 +223,7 @@ export function subdivideCountryIntoRegions(
     bMaxY + 1,
   ];
 
+  const polyBBoxes = mp.map((p) => computeBBox([p]));
   let finalCells: MultiPolygonCoords[] = [];
 
   for (let iter = 0; iter < ARENA_CONFIG.LLOYD_ITERATIONS; iter++) {
@@ -233,15 +234,21 @@ export function subdivideCountryIntoRegions(
     for (let i = 0; i < seeds.length; i++) {
       const cellRing = voronoi.cellPolygon(i);
       if (!cellRing || cellRing.length < 4) continue;
-      const cellGeom: MultiPolygonCoords = [[cellRing.map((p) => [p[0], p[1]] as Point)]];
+      const cellPts: Point[] = cellRing.map((p) => [p[0], p[1]]);
+      const cellGeom: MultiPolygonCoords = [[cellPts]];
+      const cellBox = computeBBox(cellGeom);
+      const localMp = mp.filter((_, idx) => bboxesOverlap(polyBBoxes[idx], cellBox, 0.01));
+      if (localMp.length === 0) continue;
       try {
         const clipped = polygonClipping.intersection(
-          mp as unknown as polygonClipping.Geom,
+          localMp as unknown as polygonClipping.Geom,
           cellGeom as unknown as polygonClipping.Geom,
         );
         const clean = sanitizeClippedMultiPolygon(clipped, 0.002);
         if (clean.length > 0) {
-          seeds[i] = findInteriorPoint(clean);
+          if (iter + 1 < ARENA_CONFIG.LLOYD_ITERATIONS) {
+            seeds[i] = findInteriorPoint(clean);
+          }
           iterCells.push(clean);
         }
       } catch {
@@ -427,7 +434,6 @@ export function buildRegionalTheater(
   activeEntries.forEach((entry, idx) => {
     const cid = entry.feature.id;
     const subPolys = subdivideCountryIntoRegions(cid, entry.clipped, rng);
-    const isSmall = subPolys.length <= ARENA_CONFIG.SMALL_COUNTRY_MAX_REGIONS;
     const personality = PERSONALITIES[Math.floor(rng() * PERSONALITIES.length)];
 
     countries[cid] = {
@@ -435,7 +441,6 @@ export function buildRegionalTheater(
       name: entry.feature.name,
       color: COUNTRY_PALETTE[idx % COUNTRY_PALETTE.length],
       isPlayer: entry.isPlayer,
-      isSmallCountry: isSmall,
       eliminated: false,
       personality,
       nextAiThinkSec: 2 + rng() * 2,
@@ -443,9 +448,8 @@ export function buildRegionalTheater(
       manpower: 50,
       weaponsStock: { sword: 0, spear: 0, pistol: 0, ak: 0, bazooka: 0 },
       shieldsStock: { wood: 0, bronze: 0, steel: 0, diamond: 0, forcefield: 0 },
-      // Small countries get Tier 2 science head start (Spear + Bronze Shield) per DESIGN.md
-      unlockedWeapons: isSmall ? ['sword', 'spear'] : ['sword'],
-      unlockedShields: isSmall ? ['wood', 'bronze'] : ['wood'],
+      unlockedWeapons: ['sword'],
+      unlockedShields: ['wood'],
       activeResearch: null,
       productionQueue: [],
       trainingQueue: [],
@@ -475,11 +479,24 @@ export function buildRegionalTheater(
     });
   });
 
-  const arenaWorldCountries = allWorldCountries.filter((c) =>
-    bboxesOverlap(c.bbox, [arena.minX, arena.minY, arena.maxX, arena.maxY], 0.25),
-  );
+  const marginBox: ArenaBounds = {
+    minX: arena.minX - 0.35,
+    minY: arena.minY - 0.35,
+    maxX: arena.maxX + 0.35,
+    maxY: arena.maxY + 0.35,
+  };
+  const arenaLandChunks: { bbox: [number, number, number, number]; poly: PolygonCoords }[] = [];
+  for (const c of allWorldCountries) {
+    if (!bboxesOverlap(c.bbox, [marginBox.minX, marginBox.minY, marginBox.maxX, marginBox.maxY], 0)) {
+      continue;
+    }
+    const clipped = clipMultiPolygonToBox(c.polygons, marginBox, 0.0001);
+    for (const poly of clipped) {
+      arenaLandChunks.push({ bbox: computeBBox([poly]), poly });
+    }
+  }
 
-  computeAdjacencyAndCoasts(Object.values(regions), arenaWorldCountries, arena);
+  computeAdjacencyAndCoasts(Object.values(regions), arenaLandChunks, arena);
 
   return { arena, countries, regions };
 }
@@ -493,11 +510,14 @@ function isOnArenaCutBorder(pt: Point, arena: ArenaBounds, eps = 0.08): boolean 
   );
 }
 
-function isPointOnAnyWorldLand(pt: Point, worldSubset: WorldCountryFeature[]): boolean {
-  for (const c of worldSubset) {
-    const [minX, minY, maxX, maxY] = c.bbox;
+function isPointOnAnyWorldLand(
+  pt: Point,
+  landChunks: { bbox: [number, number, number, number]; poly: PolygonCoords }[],
+): boolean {
+  for (let i = 0; i < landChunks.length; i++) {
+    const [minX, minY, maxX, maxY] = landChunks[i].bbox;
     if (pt[0] >= minX && pt[0] <= maxX && pt[1] >= minY && pt[1] <= maxY) {
-      if (pointInMultiPolygon(pt, c.polygons)) return true;
+      if (pointInPolygon(pt, landChunks[i].poly)) return true;
     }
   }
   return false;
@@ -505,7 +525,7 @@ function isPointOnAnyWorldLand(pt: Point, worldSubset: WorldCountryFeature[]): b
 
 function computeAdjacencyAndCoasts(
   regionList: Region[],
-  arenaWorldCountries: WorldCountryFeature[],
+  arenaLandChunks: { bbox: [number, number, number, number]; poly: PolygonCoords }[],
   arena: ArenaBounds,
 ): void {
   const n = regionList.length;
@@ -560,7 +580,7 @@ function computeAdjacencyAndCoasts(
         ) {
           continue;
         }
-        if (!isPointOnAnyWorldLand(outward, arenaWorldCountries)) {
+        if (!isPointOnAnyWorldLand(outward, arenaLandChunks)) {
           foundCoast = outward;
           break;
         }

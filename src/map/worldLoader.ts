@@ -1,5 +1,6 @@
 import * as topojson from 'topojson-client';
-import type { Topology, GeometryCollection } from 'topojson-specification';
+import type { GeometryCollection, GeometryObject, Polygon, MultiPolygon, Topology } from 'topojson-specification';
+import { ARENA_CONFIG } from '../config/balance';
 import type { MultiPolygonCoords, Point, PolygonCoords, Ring, WorldCountryFeature } from '../types';
 import {
   computeBBox,
@@ -42,43 +43,200 @@ function normalizeRingLonLat(rawRing: number[][]): Ring {
   return ring;
 }
 
+function geoJsonToMultiPolygonCoords(geom: { type: string; coordinates?: unknown } | null): MultiPolygonCoords {
+  if (!geom || !geom.coordinates) return [];
+  const rawPolys: number[][][][] =
+    geom.type === 'Polygon'
+      ? [geom.coordinates as number[][][]]
+      : geom.type === 'MultiPolygon'
+        ? (geom.coordinates as number[][][][])
+        : [];
+  const polygons: MultiPolygonCoords = [];
+  for (const rawPoly of rawPolys) {
+    const poly: PolygonCoords = [];
+    for (const rawRing of rawPoly) {
+      const ring = normalizeRingLonLat(rawRing);
+      if (ring.length >= 4) poly.push(ring);
+    }
+    if (poly.length > 0) polygons.push(poly);
+  }
+  return polygons;
+}
+
+function computeTopoArcLengths(topo: Topology): number[] {
+  const t = topo.transform;
+  return topo.arcs.map((arc) => {
+    let x = 0;
+    let y = 0;
+    let prevPt: Point | null = null;
+    let len = 0;
+    for (let i = 0; i < arc.length; i++) {
+      x += arc[i][0];
+      y += arc[i][1];
+      const lon = t ? x * t.scale[0] + t.translate[0] : x;
+      const lat = t ? y * t.scale[1] + t.translate[1] : y;
+      const pt = projectLonLat(lon, lat);
+      if (prevPt) len += Math.hypot(pt[0] - prevPt[0], pt[1] - prevPt[1]);
+      prevPt = pt;
+    }
+    return len;
+  });
+}
+
+function collectArcIndices(geom: GeometryObject<{ name?: string }>): number[] {
+  const out: number[] = [];
+  const rawArcs = (geom as Polygon | MultiPolygon).arcs as unknown;
+  if (!rawArcs) return out;
+  const walk = (arr: unknown): void => {
+    if (!Array.isArray(arr) || arr.length === 0) return;
+    if (typeof arr[0] === 'number') {
+      for (const idx of arr as number[]) {
+        out.push(idx < 0 ? ~idx : idx);
+      }
+    } else {
+      for (const sub of arr) walk(sub);
+    }
+  };
+  walk(rawArcs);
+  return out;
+}
+
+/**
+ * Parse world TopoJSON into playable countries:
+ * - Drops Antarctica.
+ * - Drops <=4-region island countries (e.g. Cyprus, N. Cyprus, Malta, Singapore).
+ * - Merges <=4-region land countries (e.g. Vatican, San Marino, Monaco, Luxembourg, Lebanon)
+ *   into the major (>4-region) neighbor with which they share the longest border.
+ */
 export function parseWorldTopology(topo: Topology): WorldCountryFeature[] {
   const countriesObj = topo.objects.countries as GeometryCollection<{ name?: string }>;
+  const geoms = countriesObj.geometries;
   const fc = topojson.feature(topo, countriesObj);
+
+  const count = geoms.length;
+  const names: string[] = new Array(count);
+  const areas: number[] = new Array(count).fill(0);
+  const isValid: boolean[] = new Array(count).fill(false);
+  const isMajor: boolean[] = new Array(count).fill(false);
+
+  for (let i = 0; i < count; i++) {
+    const feat = fc.features[i];
+    const name = feat.properties?.name?.trim() || `Country ${i + 1}`;
+    names[i] = name;
+    if (name === 'Antarctica') continue;
+    const polys = geoJsonToMultiPolygonCoords(feat.geometry);
+    if (polys.length === 0) continue;
+    const area = multiPolygonArea(polys);
+    if (area <= 1e-6) continue;
+    areas[i] = area;
+    isValid[i] = true;
+    const estRegions = Math.max(1, Math.round(area / ARENA_CONFIG.TARGET_REGION_AREA));
+    isMajor[i] = estRegions > ARENA_CONFIG.SMALL_COUNTRY_MAX_REGIONS;
+  }
+
+  // Compute exact shared border lengths from TopoJSON arcs
+  const arcLens = computeTopoArcLengths(topo);
+  const arcOwners = new Map<number, Set<number>>();
+  for (let i = 0; i < count; i++) {
+    if (!isValid[i]) continue;
+    for (const arcId of collectArcIndices(geoms[i])) {
+      let owners = arcOwners.get(arcId);
+      if (!owners) {
+        owners = new Set<number>();
+        arcOwners.set(arcId, owners);
+      }
+      owners.add(i);
+    }
+  }
+
+  const sharedBorder: Array<Map<number, number>> = Array.from({ length: count }, () => new Map());
+  for (const [arcId, owners] of arcOwners) {
+    if (owners.size < 2) continue;
+    const arr = [...owners];
+    const len = arcLens[arcId] ?? 0;
+    for (let a = 0; a < arr.length; a++) {
+      for (let b = a + 1; b < arr.length; b++) {
+        const u = arr[a];
+        const v = arr[b];
+        sharedBorder[u].set(v, (sharedBorder[u].get(v) ?? 0) + len);
+        sharedBorder[v].set(u, (sharedBorder[v].get(u) ?? 0) + len);
+      }
+    }
+  }
+
+  // Assign each <=4-region land country to the major host with the longest shared border (iteratively for chains)
+  const hostOf: number[] = new Array(count).fill(-1);
+  for (let i = 0; i < count; i++) {
+    if (isValid[i] && isMajor[i]) hostOf[i] = i;
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 0; i < count; i++) {
+      if (!isValid[i] || hostOf[i] !== -1) continue;
+      // Sum shared border lengths per candidate resolved major host
+      const borderByHost = new Map<number, number>();
+      for (const [nb, len] of sharedBorder[i]) {
+        const nbHost = hostOf[nb];
+        if (nbHost !== -1) {
+          borderByHost.set(nbHost, (borderByHost.get(nbHost) ?? 0) + len);
+        }
+      }
+      if (borderByHost.size === 0) continue;
+      let bestHost = -1;
+      let bestLen = -1;
+      for (const [h, len] of borderByHost) {
+        if (len > bestLen || (len === bestLen && areas[h] > areas[bestHost])) {
+          bestLen = len;
+          bestHost = h;
+        }
+      }
+      if (bestHost !== -1) {
+        hostOf[i] = bestHost;
+        changed = true;
+      }
+    }
+  }
+
+  // Group absorbed small countries under their surviving major host; unassigned small islands are dropped!
+  const groupedIndices = new Map<number, number[]>();
+  for (let i = 0; i < count; i++) {
+    const h = hostOf[i];
+    if (h === -1) continue;
+    let list = groupedIndices.get(h);
+    if (!list) {
+      list = [];
+      groupedIndices.set(h, list);
+    }
+    list.push(i);
+  }
+
   const features: WorldCountryFeature[] = [];
   const usedIds = new Set<string>();
 
-  fc.features.forEach((feat, idx) => {
-    const name = feat.properties?.name?.trim() || `Country ${idx + 1}`;
-    if (name === 'Antarctica') return;
+  for (const [hostIdx, memberIndices] of groupedIndices) {
+    const feat = fc.features[hostIdx];
+    const name = names[hostIdx];
 
-    const geom = feat.geometry;
-    if (!geom) return;
-    const rawPolys: number[][][][] =
-      geom.type === 'Polygon'
-        ? [geom.coordinates]
-        : geom.type === 'MultiPolygon'
-          ? geom.coordinates
-          : [];
-    if (rawPolys.length === 0) return;
-
-    const polygons: MultiPolygonCoords = [];
-    for (const rawPoly of rawPolys) {
-      const poly: PolygonCoords = [];
-      for (const rawRing of rawPoly) {
-        const ring = normalizeRingLonLat(rawRing);
-        if (ring.length >= 4) poly.push(ring);
-      }
-      if (poly.length > 0) polygons.push(poly);
+    let polygons: MultiPolygonCoords;
+    if (memberIndices.length === 1) {
+      polygons = geoJsonToMultiPolygonCoords(feat.geometry);
+    } else {
+      const mergeGeoms = memberIndices
+        .map((idx) => geoms[idx])
+        .filter((g): g is Polygon | MultiPolygon => g.type === 'Polygon' || g.type === 'MultiPolygon');
+      const merged = topojson.merge(topo, mergeGeoms);
+      polygons = geoJsonToMultiPolygonCoords(merged);
     }
-    if (polygons.length === 0) return;
+    if (polygons.length === 0) continue;
 
     let baseId = feat.id !== undefined && feat.id !== null ? String(feat.id) : slugify(name);
-    if (usedIds.has(baseId)) baseId = `${baseId}_${idx}`;
+    if (usedIds.has(baseId)) baseId = `${baseId}_${hostIdx}`;
     usedIds.add(baseId);
 
     const area = multiPolygonArea(polygons);
-    if (area <= 1e-6) return;
+    if (area <= 1e-6) continue;
 
     features.push({
       id: baseId,
@@ -88,7 +246,7 @@ export function parseWorldTopology(topo: Topology): WorldCountryFeature[] {
       bbox: computeBBox(polygons),
       area,
     });
-  });
+  }
 
   return features;
 }
@@ -100,11 +258,10 @@ export async function fetchWorldCountries(url = '/assets/world-50m.json'): Promi
   return parseWorldTopology(topo);
 }
 
-/** Hit-test map point against world countries; tiny enclaves (like Vatican) win when overlapping larger countries. */
+/** Hit-test map point against world countries. */
 export function pickWorldCountryAtPoint(
   pt: Point,
   countries: WorldCountryFeature[],
-  clickRadiusMapUnits = 0.35,
 ): WorldCountryFeature | null {
   const hits: WorldCountryFeature[] = [];
   for (const c of countries) {
@@ -119,20 +276,7 @@ export function pickWorldCountryAtPoint(
     hits.sort((a, b) => a.area - b.area);
     return hits[0];
   }
-  // Assist clicking microstates (Vatican, Monaco, San Marino, Malta) within small cursor radius
-  let nearest: WorldCountryFeature | null = null;
-  let nearestDistSq = clickRadiusMapUnits * clickRadiusMapUnits;
-  for (const c of countries) {
-    if (c.area > 0.5) continue;
-    const dx = pt[0] - c.centroid[0];
-    const dy = pt[1] - c.centroid[1];
-    const d2 = dx * dx + dy * dy;
-    if (d2 < nearestDistSq) {
-      nearestDistSq = d2;
-      nearest = c;
-    }
-  }
-  return nearest;
+  return null;
 }
 
 function slugify(s: string): string {

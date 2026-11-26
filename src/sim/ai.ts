@@ -22,7 +22,6 @@ import {
   queueBarracksTraining,
   queueFactoryProduction,
   startBuildingConstruction,
-  startCombinedBuildingUpgrade,
   startTechResearch,
 } from './economy';
 
@@ -105,41 +104,34 @@ function runAIEconomyAndProduction(
   rng: () => number,
 ): void {
   // 1. Buildings
-  if (ai.isSmallCountry) {
-    const compReg = owned.find((r) => r.building?.type === 'combined') ?? owned[0];
-    if (compReg && ai.money >= 260) {
-      startCombinedBuildingUpgrade(state, ai.id, compReg.id);
-    }
-  } else {
-    const emptyRegs = owned.filter((r) => !r.building);
-    const constructingAny = owned.some((r) => r.building?.constructing);
-    if (emptyRegs.length > 0 && !constructingAny && ai.money >= 165) {
-      const banks = getEffectiveBuildingCount(state, ai.id, 'bank');
-      const factories = getEffectiveBuildingCount(state, ai.id, 'factory');
-      const barracks = getEffectiveBuildingCount(state, ai.id, 'barracks');
-      const hospitals = getEffectiveBuildingCount(state, ai.id, 'hospital');
-      const unis = getEffectiveBuildingCount(state, ai.id, 'university');
-      const ports = getEffectiveBuildingCount(state, ai.id, 'port');
+  const emptyRegs = owned.filter((r) => !r.building);
+  const constructingAny = owned.some((r) => r.building?.constructing);
+  if (emptyRegs.length > 0 && !constructingAny && ai.money >= 165) {
+    const banks = getEffectiveBuildingCount(state, ai.id, 'bank');
+    const factories = getEffectiveBuildingCount(state, ai.id, 'factory');
+    const barracks = getEffectiveBuildingCount(state, ai.id, 'barracks');
+    const hospitals = getEffectiveBuildingCount(state, ai.id, 'hospital');
+    const unis = getEffectiveBuildingCount(state, ai.id, 'university');
+    const ports = getEffectiveBuildingCount(state, ai.id, 'port');
 
-      let desired: Exclude<BuildingType, 'combined'> | null = null;
-      if (banks < 1) desired = 'bank';
-      else if (factories < 1) desired = 'factory';
-      else if (barracks < 1) desired = 'barracks';
-      else if (ai.personality === 'economist' && banks < 2) desired = 'bank';
-      else if (unis < 1 && (ai.personality === 'economist' || ai.money >= 240)) desired = 'university';
-      else if (hospitals < 1) desired = 'hospital';
-      else if (ports < 1 && emptyRegs.some((r) => r.isCoastal)) desired = 'port';
-      else if (banks < 3) desired = 'bank';
-      else if (factories < 2) desired = 'factory';
+    let desired: BuildingType | null = null;
+    if (banks < 1) desired = 'bank';
+    else if (factories < 1) desired = 'factory';
+    else if (barracks < 1) desired = 'barracks';
+    else if (ai.personality === 'economist' && banks < 2) desired = 'bank';
+    else if (unis < 1 && (ai.personality === 'economist' || ai.money >= 240)) desired = 'university';
+    else if (hospitals < 1) desired = 'hospital';
+    else if (ports < 1 && emptyRegs.some((r) => r.isCoastal)) desired = 'port';
+    else if (banks < 3) desired = 'bank';
+    else if (factories < 2) desired = 'factory';
 
-      if (desired) {
-        const targetReg =
-          desired === 'port'
-            ? emptyRegs.find((r) => r.isCoastal)
-            : emptyRegs[Math.floor(rng() * emptyRegs.length)];
-        if (targetReg) {
-          startBuildingConstruction(state, ai.id, targetReg.id, desired);
-        }
+    if (desired) {
+      const targetReg =
+        desired === 'port'
+          ? emptyRegs.find((r) => r.isCoastal)
+          : emptyRegs[Math.floor(rng() * emptyRegs.length)];
+      if (targetReg) {
+        startBuildingConstruction(state, ai.id, targetReg.id, desired);
       }
     }
   }

@@ -1,6 +1,5 @@
 import {
   BUILDINGS,
-  COMBINED_UPGRADE_COSTS,
   ECONOMY,
   SHIELD_ORDER,
   SHIELDS,
@@ -49,11 +48,11 @@ export function getActiveBuildingLevel(b: Region['building']): number {
   return b.constructing ? Math.max(0, b.level - 1) : b.level;
 }
 
-/** Count effective active building capacity for a country (including small-country Combined Building levels). */
+/** Count effective active building capacity for a country. */
 export function getEffectiveBuildingCount(
   state: GameState,
   countryId: string,
-  type: Exclude<BuildingType, 'combined'>,
+  type: BuildingType,
 ): number {
   let total = 0;
   for (const reg of Object.values(state.regions)) {
@@ -62,12 +61,6 @@ export function getEffectiveBuildingCount(
     if (activeLv <= 0) continue;
     if (reg.building.type === type) {
       total += activeLv;
-    } else if (reg.building.type === 'combined') {
-      if (type === 'port') {
-        if (reg.isCoastal) total += 1;
-      } else {
-        total += activeLv;
-      }
     }
   }
   return total;
@@ -95,53 +88,35 @@ export function getCountryManpowerPerSec(state: GameState, countryId: string): n
   return Math.round(fromHealth * 100) / 100;
 }
 
-/** Place starting buildings per DESIGN.md: 1 Bank + 1 Barracks for normal countries; 1 Combined Building for small countries. */
+/** Place starting buildings for each country (updated to single University in v1.2 Stage 2). */
 export function placeInitialCountryBuildings(state: GameState): void {
   for (const country of Object.values(state.countries)) {
     const owned = getCountryRegions(state, country.id);
     if (owned.length === 0) continue;
 
-    if (country.isSmallCountry) {
-      // Prefer a coastal region if available so Combined Building also grants Port capability
-      const target = owned.find((r) => r.isCoastal) ?? owned[0];
-      target.building = {
-        type: 'combined',
+    // Sort largest/most central regions first
+    const sorted = [...owned].sort((a, b) => b.area - a.area);
+    sorted[0].building = {
+      type: 'bank',
+      level: 1,
+      constructing: false,
+      progressSec: 0,
+      totalSec: 0,
+      x: sorted[0].centroid[0],
+      y: sorted[0].centroid[1],
+    };
+    clearPropsUnderBuilding(sorted[0], sorted[0].centroid[0], sorted[0].centroid[1]);
+    if (sorted[1]) {
+      sorted[1].building = {
+        type: 'barracks',
         level: 1,
         constructing: false,
         progressSec: 0,
         totalSec: 0,
-        x: target.centroid[0],
-        y: target.centroid[1],
+        x: sorted[1].centroid[0],
+        y: sorted[1].centroid[1],
       };
-      clearPropsUnderBuilding(target, target.centroid[0], target.centroid[1]);
-      if (target.isCoastal) {
-        ensurePortShipForRegion(state, target);
-      }
-    } else {
-      // Sort largest/most central regions first
-      const sorted = [...owned].sort((a, b) => b.area - a.area);
-      sorted[0].building = {
-        type: 'bank',
-        level: 1,
-        constructing: false,
-        progressSec: 0,
-        totalSec: 0,
-        x: sorted[0].centroid[0],
-        y: sorted[0].centroid[1],
-      };
-      clearPropsUnderBuilding(sorted[0], sorted[0].centroid[0], sorted[0].centroid[1]);
-      if (sorted[1]) {
-        sorted[1].building = {
-          type: 'barracks',
-          level: 1,
-          constructing: false,
-          progressSec: 0,
-          totalSec: 0,
-          x: sorted[1].centroid[0],
-          y: sorted[1].centroid[1],
-        };
-        clearPropsUnderBuilding(sorted[1], sorted[1].centroid[0], sorted[1].centroid[1]);
-      }
+      clearPropsUnderBuilding(sorted[1], sorted[1].centroid[0], sorted[1].centroid[1]);
     }
   }
 }
@@ -171,7 +146,7 @@ export function ensurePortShipForRegion(state: GameState, reg: Region): Transpor
 export function validateBuildingPlacementAtPoint(
   state: GameState,
   countryId: string,
-  type: Exclude<BuildingType, 'combined'>,
+  type: BuildingType,
   pt: Point,
 ): { ok: boolean; region: Region | null; reason?: string } {
   const country = state.countries[countryId];
@@ -201,7 +176,7 @@ export function startBuildingConstruction(
   state: GameState,
   countryId: string,
   regionId: string,
-  type: Exclude<BuildingType, 'combined'>,
+  type: BuildingType,
   customPoint?: Point,
 ): { ok: boolean; error?: string } {
   const country = state.countries[countryId];
@@ -238,46 +213,6 @@ export function startBuildingConstruction(
     y: by,
   };
   clearPropsUnderBuilding(reg, bx, by);
-  return { ok: true };
-}
-
-export function startCombinedBuildingUpgrade(
-  state: GameState,
-  countryId: string,
-  regionId: string,
-): { ok: boolean; error?: string } {
-  const country = state.countries[countryId];
-  const reg = state.regions[regionId];
-  if (!country || !reg || reg.ownerId !== countryId) {
-    return { ok: false, error: 'Geçersiz bölge.' };
-  }
-  if (!country.isSmallCountry) {
-    return { ok: false, error: 'Merkez Kompleks yalnızca küçük ülkeler içindir.' };
-  }
-  if (!reg.building) {
-    if (country.money < BUILDINGS.combined.cost) return { ok: false, error: 'Yetersiz para.' };
-    country.money -= BUILDINGS.combined.cost;
-    reg.building = {
-      type: 'combined',
-      level: 1,
-      constructing: true,
-      progressSec: 0,
-      totalSec: BUILDINGS.combined.buildSec,
-    };
-    return { ok: true };
-  }
-  if (reg.building.type !== 'combined') return { ok: false, error: 'Bu bölgede farklı bina var.' };
-  if (reg.building.constructing) return { ok: false, error: 'İnşaat/geliştirme devam ediyor.' };
-  const nextLevel = reg.building.level + 1;
-  const cost = COMBINED_UPGRADE_COSTS[nextLevel];
-  if (!cost) return { ok: false, error: 'Maksimum kademeye ulaşıldı.' };
-  if (country.money < cost) return { ok: false, error: 'Yetersiz para.' };
-
-  country.money -= cost;
-  reg.building.level = nextLevel;
-  reg.building.constructing = true;
-  reg.building.progressSec = 0;
-  reg.building.totalSec = BUILDINGS.combined.buildSec;
   return { ok: true };
 }
 
@@ -439,7 +374,7 @@ export function spawnUnitsIntoCountryBarracks(
       (r) =>
         r.building &&
         !r.building.constructing &&
-        (r.building.type === 'barracks' || r.building.type === 'combined'),
+        r.building.type === 'barracks',
     ) ?? owned[0];
 
   const [sx, sy] = getRegionBuildingPoint(spawnRegion);
@@ -489,7 +424,7 @@ export function tickEconomyAndQueues(state: GameState, dtSimSec: number): void {
       if (reg.building.progressSec >= reg.building.totalSec) {
         reg.building.constructing = false;
         reg.building.progressSec = reg.building.totalSec;
-        if (reg.building.type === 'port' || (reg.building.type === 'combined' && reg.isCoastal)) {
+        if (reg.building.type === 'port') {
           ensurePortShipForRegion(state, reg);
         }
       }
@@ -582,7 +517,7 @@ export function tickEconomyAndQueues(state: GameState, dtSimSec: number): void {
 export function isBuildingWorking(state: GameState, country: Country, reg: Region): boolean {
   const b = reg.building;
   if (!b || b.constructing) return false;
-  if (b.type === 'bank' || b.type === 'combined') return true;
+  if (b.type === 'bank') return true;
   if (b.type === 'factory') return country.productionQueue.length > 0;
   if (b.type === 'barracks') return country.trainingQueue.length > 0;
   if (b.type === 'university') return country.activeResearch !== null;

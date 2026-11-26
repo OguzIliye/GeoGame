@@ -611,7 +611,7 @@ export function findNearestHospitalRegion(
     if (reg.ownerId !== countryId || getActiveBuildingLevel(reg.building) <= 0 || !reg.building) {
       continue;
     }
-    if (reg.building.type !== 'hospital' && reg.building.type !== 'combined') continue;
+    if (reg.building.type !== 'hospital') continue;
     const [hx, hy] = getRegionBuildingPoint(reg);
     const dx = hx - from[0];
     const dy = hy - from[1];
@@ -701,7 +701,7 @@ function dispatchEscapedWoundedToHospital(
   lostUnits: Record<string, number>,
 ): void {
   const hospReg = findNearestHospitalRegion(state, countryId, origin);
-  // If country has no standing Hospital (or Combined Building), escaped soldiers cannot be saved
+  // If country has no standing Hospital, escaped soldiers cannot be saved
   if (!hospReg) return;
 
   const escapedUnits: Record<string, number> = {};
@@ -1069,7 +1069,7 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
       hospReg.ownerId !== w.countryId ||
       getActiveBuildingLevel(hospReg.building) <= 0 ||
       !hospReg.building ||
-      (hospReg.building.type !== 'hospital' && hospReg.building.type !== 'combined')
+      hospReg.building.type !== 'hospital'
     ) {
       const curPos: Point = [
         w.from[0] + (w.to[0] - w.from[0]) * w.travelProgress,

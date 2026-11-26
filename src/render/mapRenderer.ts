@@ -8,6 +8,7 @@ import {
   type SoldierPose,
 } from '../art/pixelSprites';
 import { BUILDINGS } from '../config/balance';
+import { minDistToMultiPolygonSq } from '../map/geometry';
 import { getMaxTierVisualsForUnits, getTotalSoldiers } from '../sim/army';
 import {
   getRegionBuildingPoint,
@@ -33,8 +34,58 @@ const BUILDING_SHORT: Record<BuildingType, string> = {
   factory: 'FBR',
   university: 'ÜNİ',
   port: 'LMN',
-  combined: 'MRK',
 };
+
+interface CachedCountryBorders {
+  sig: string;
+  allOuterSegments: [Point, Point][];
+  playerOuterSegments: [Point, Point][];
+}
+
+let borderCache: CachedCountryBorders | null = null;
+
+function getCountryOuterBorders(state: GameState, regionList: Region[]): CachedCountryBorders {
+  const sig = `${state.playerCountryId ?? ''}|${regionList.map((r) => `${r.id}:${r.ownerId}`).join(',')}`;
+  if (borderCache && borderCache.sig === sig) return borderCache;
+
+  const allOuterSegments: [Point, Point][] = [];
+  const playerOuterSegments: [Point, Point][] = [];
+  const threshSq = 0.028 * 0.028;
+
+  for (const reg of regionList) {
+    const sameNeighbors: Region[] = [];
+    for (const nid of reg.neighbors) {
+      const nb = state.regions[nid];
+      if (nb && nb.ownerId === reg.ownerId) sameNeighbors.push(nb);
+    }
+    const isPlayerOwner = reg.ownerId === state.playerCountryId;
+
+    for (const poly of reg.polygons) {
+      for (const ring of poly) {
+        for (let i = 0; i < ring.length - 1; i++) {
+          const p1 = ring[i];
+          const p2 = ring[i + 1];
+          const mid: Point = [(p1[0] + p2[0]) * 0.5, (p1[1] + p2[1]) * 0.5];
+
+          let isInternal = false;
+          for (let k = 0; k < sameNeighbors.length; k++) {
+            if (minDistToMultiPolygonSq(mid, sameNeighbors[k].polygons) <= threshSq) {
+              isInternal = true;
+              break;
+            }
+          }
+          if (!isInternal) {
+            allOuterSegments.push([p1, p2]);
+            if (isPlayerOwner) playerOuterSegments.push([p1, p2]);
+          }
+        }
+      }
+    }
+  }
+
+  borderCache = { sig, allOuterSegments, playerOuterSegments };
+  return borderCache;
+}
 
 function traceMultiPolygon(
   ctx: CanvasRenderingContext2D,
@@ -111,8 +162,8 @@ export function renderWorldSelectMap(
     const shade = 30 + ((i * 37) % 24);
     ctx.fillStyle = isHovered ? '#facc15' : `hsl(142, 26%, ${shade}%)`;
     ctx.fill();
-    ctx.lineWidth = isHovered ? 2 : 1;
-    ctx.strokeStyle = isHovered ? '#fef08a' : '#0b1929';
+    ctx.lineWidth = isHovered ? 3.2 : 2.2;
+    ctx.strokeStyle = isHovered ? '#fef08a' : '#090d16';
     ctx.stroke();
   }
 
@@ -275,7 +326,6 @@ export function renderRegionalTheater(
   for (const reg of regionList) {
     const owner = state.countries[reg.ownerId];
     if (!owner) continue;
-    const isSelected = reg.id === state.selectedRegionId;
     const isHoveredPlacement = placementCheck?.region?.id === reg.id;
 
     traceMultiPolygon(ctx, reg.polygons, camera, viewW, viewH);
@@ -287,16 +337,54 @@ export function renderRegionalTheater(
       ctx.fill();
     }
 
-    ctx.lineWidth = isHoveredPlacement ? 3 : isSelected ? 2.5 : owner.isPlayer ? 1.6 : 1.1;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.34)';
+    ctx.stroke();
+  }
+
+  // 1.5 Thick (3.8px) Country Outer Borders + Selected/Hovered Region Highlight
+  const borders = getCountryOuterBorders(state, regionList);
+  if (borders.allOuterSegments.length > 0) {
+    ctx.save();
+    ctx.lineWidth = 3.8;
+    ctx.strokeStyle = '#090d16';
+    ctx.beginPath();
+    for (let i = 0; i < borders.allOuterSegments.length; i++) {
+      const [p1, p2] = borders.allOuterSegments[i];
+      const [x1, y1] = camera.mapToScreen(p1[0], p1[1], viewW, viewH);
+      const [x2, y2] = camera.mapToScreen(p2[0], p2[1], viewW, viewH);
+      ctx.moveTo(Math.round(x1), Math.round(y1));
+      ctx.lineTo(Math.round(x2), Math.round(y2));
+    }
+    ctx.stroke();
+
+    if (borders.playerOuterSegments.length > 0) {
+      ctx.lineWidth = 1.6;
+      ctx.strokeStyle = 'rgba(254, 240, 138, 0.85)';
+      ctx.beginPath();
+      for (let i = 0; i < borders.playerOuterSegments.length; i++) {
+        const [p1, p2] = borders.playerOuterSegments[i];
+        const [x1, y1] = camera.mapToScreen(p1[0], p1[1], viewW, viewH);
+        const [x2, y2] = camera.mapToScreen(p2[0], p2[1], viewW, viewH);
+        ctx.moveTo(Math.round(x1), Math.round(y1));
+        ctx.lineTo(Math.round(x2), Math.round(y2));
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  for (const reg of regionList) {
+    const isSelected = reg.id === state.selectedRegionId;
+    const isHoveredPlacement = placementCheck?.region?.id === reg.id;
+    if (!isSelected && !isHoveredPlacement) continue;
+    traceMultiPolygon(ctx, reg.polygons, camera, viewW, viewH);
+    ctx.lineWidth = 3;
     ctx.strokeStyle = isHoveredPlacement
       ? placementCheck?.ok
         ? '#4ade80'
         : '#f87171'
-      : isSelected
-        ? '#fde047'
-        : owner.isPlayer
-          ? 'rgba(255, 255, 255, 0.6)'
-          : 'rgba(15, 23, 42, 0.5)';
+      : '#fde047';
     ctx.stroke();
   }
 
@@ -339,12 +427,12 @@ export function renderRegionalTheater(
       if (camera.scale >= 16) {
         const label = BUILDING_SHORT[b.type] ?? BUILDINGS[b.type].name.slice(0, 3);
         ctx.save();
-        ctx.font = 'bold 10px "Courier New", monospace';
+        ctx.font = 'bold 12px Consolas, "Courier New", monospace';
         ctx.textAlign = 'center';
         ctx.fillStyle = '#090d16';
-        ctx.fillText(label, Math.round(bx + 1), Math.round(by + 11 * spriteStep + 9));
-        ctx.fillStyle = '#fef08a';
-        ctx.fillText(label, Math.round(bx), Math.round(by + 11 * spriteStep + 8));
+        ctx.fillText(label, Math.round(bx + 1), Math.round(by + 11 * spriteStep + 11));
+        ctx.fillStyle = '#fef047';
+        ctx.fillText(label, Math.round(bx), Math.round(by + 11 * spriteStep + 10));
         ctx.restore();
       }
     }
@@ -610,10 +698,10 @@ export function drawPixelTag(
   borderColor = '#334155',
 ): void {
   ctx.save();
-  ctx.font = 'bold 11px "Courier New", monospace';
+  ctx.font = 'bold 13px Consolas, "Courier New", monospace';
   const m = ctx.measureText(text);
-  const w = Math.ceil(m.width) + 10;
-  const h = 18;
+  const w = Math.ceil(m.width) + 14;
+  const h = 22;
   const rx = Math.round(sx - w * 0.5);
   const ry = Math.round(sy - h * 0.5);
   ctx.fillStyle = bg;

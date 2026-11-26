@@ -11,8 +11,7 @@ export type BuildingType =
   | 'bank'
   | 'factory'
   | 'university'
-  | 'port'
-  | 'combined';
+  | 'port';
 
 export type WeaponId = 'sword' | 'spear' | 'pistol' | 'ak' | 'bazooka';
 export type ShieldId = 'none' | 'wood' | 'bronze' | 'steel' | 'diamond' | 'forcefield';
@@ -34,7 +33,7 @@ export interface WorldCountryFeature {
 
 export interface BuildingSlot {
   type: BuildingType;
-  level: number; // 1 for standard buildings; 1..3 for 'combined'
+  level: number;
   constructing: boolean;
   progressSec: number;
   totalSec: number;
@@ -113,7 +112,6 @@ export interface Country {
   name: string;
   color: string;
   isPlayer: boolean;
-  isSmallCountry: boolean;
   eliminated: boolean;
   personality: AIPersonality;
   nextAiThinkSec: number;
@@ -226,7 +224,7 @@ export interface GameState {
   selectedRegionId: string | null;
   moveOrderMode: boolean; // True when an army or loaded ship is awaiting a map target click
 
-  placingBuildingType: Exclude<BuildingType, 'combined'> | null;
+  placingBuildingType: BuildingType | null;
   placementHoverPoint: Point | null;
   autoPauseReasons: AutoPauseReason[];
   activeEncounter: EncounterPrompt | null;

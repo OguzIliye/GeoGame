@@ -114,7 +114,7 @@ async function bootstrap(): Promise<void> {
     ui.syncFrame();
   }
 
-  function enterBuildingPlacement(type: Exclude<BuildingType, 'combined'>): void {
+  function enterBuildingPlacement(type: BuildingType): void {
     cancelSelectionAndOrderMode(state);
     state.placingBuildingType = type;
     state.placementHoverPoint = [camera.cx, camera.cy];

@@ -3,7 +3,6 @@ import { RetroMusicController } from '../audio/music';
 import {
   BUILDINGS,
   CALENDAR,
-  COMBINED_UPGRADE_COSTS,
   SHIELD_ORDER,
   SHIELDS,
   WEAPON_ORDER,
@@ -43,7 +42,6 @@ import {
   getEffectiveBuildingCount,
   queueBarracksTraining,
   queueFactoryProduction,
-  startCombinedBuildingUpgrade,
   startTechResearch,
 } from '../sim/economy';
 import { computeStandings } from '../sim/scoring';
@@ -64,7 +62,7 @@ export interface GameUICallbacks {
   onReturnToWorld: () => void;
   onReturnToMainMenu: () => void;
   onCycleArmyFocus: () => void;
-  onEnterBuildingPlacement: (type: Exclude<BuildingType, 'combined'>) => void;
+  onEnterBuildingPlacement: (type: BuildingType) => void;
   onCancelPlacementOrOrder: () => void;
 }
 
@@ -359,14 +357,14 @@ export class GameUIController {
     const promptHtml = this.state.tutorialPromptOpen
       ? `
         <div class="tutorial-prompt-modal">
-          <div class="pixel-panel modal-window" style="max-width:460px;text-align:center">
+          <div class="pixel-panel modal-window" style="max-width:640px;text-align:center">
             <div class="modal-header" style="justify-content:center">
               <strong>📖 Tutorial Seçeneği</strong>
             </div>
-            <p style="margin:12px 0;line-height:1.6;font-size:13px">
+            <p style="margin:16px 0;line-height:1.65;font-size:16.5px">
               Oyuna başlamadan önce <b>Pixel World</b>'ün nasıl oynandığını gösteren kısa Tutorial'ı oynamak / incelemek ister misiniz?
             </p>
-            <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px">
+            <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:18px">
               <button class="pixel-btn active-btn" id="btn-prompt-yes">📖 Evet, Tutorial'ı Aç</button>
               <button class="pixel-btn" id="btn-prompt-no">▶ Hayır, Direkt Haritaya Geç</button>
             </div>
@@ -378,7 +376,7 @@ export class GameUIController {
     this.root.innerHTML = `
       <div class="main-menu-shell">
         <div class="pixel-panel main-menu-actions">
-          <div class="muted" style="font-size:12px;color:#cbd5e1;text-align:center">
+          <div class="muted" style="font-size:15px;color:#e2e8f0;text-align:center">
             Bölgesel Strateji • Ekonomi • Teknoloji • Savaş
           </div>
           <div class="main-menu-btn-row">
@@ -434,22 +432,22 @@ export class GameUIController {
         title: '1/5 — Dünya Haritası & Bölgesel Arena',
         body: `
           <p>🌍 Haritadan dilediğiniz ülkeye tıklayarak oyuna başlarsınız. Seçtiğiniz ülkenin etrafında en fazla <b>15 AI ülke</b> içeren aktif bir bölgesel arena açılır.</p>
-          <p style="margin-top:8px">⏱️ <b>Zaman Akışı:</b> <code>1x</code> hızda gerçek 1 saniye çeyrek oyun günüdür (<code>4 sn = 1 gün</code>). Tam kampanya <code>1 Ocak 2000 → 1 Ocak ${CALENDAR.END_YEAR}</code> (~4 saat) sürer; tüm bölgeyi daha erken fethederseniz erken zafer kazanırsınız.</p>
-          <p style="margin-top:8px">🔍 Fare tekerleğiyle haritaya yaklaştığınızda binalar ve askerler haritayla birlikte büyür; detaylı pixel art'ları yakından inceleyebilirsiniz.</p>
+          <p style="margin-top:10px">⏱️ <b>Zaman Akışı:</b> <code>1x</code> hızda gerçek 1 saniye çeyrek oyun günüdür (<code>4 sn = 1 gün</code>). Tam kampanya <code>1 Ocak 2000 → 1 Ocak ${CALENDAR.END_YEAR}</code> (~4 saat) sürer; tüm bölgeyi daha erken fethederseniz erken zafer kazanırsınız.</p>
+          <p style="margin-top:10px">🔍 Fare tekerleğiyle haritaya yaklaştığınızda binalar ve askerler haritayla birlikte büyür; detaylı pixel art'ları yakından inceleyebilirsiniz.</p>
         `,
       },
       {
         title: '2/5 — Ekonomi & Fareyle Manuel Bina Kurma',
         body: `
-          <p>💰 <b>Banka</b> para (<code>+12/sn</code>), ❤️ <b>Hastane</b> sağlık ve Manpower artışı sağlar. Her bölgeye en fazla <b>1 bina</b> kurulur (1–4 bölgeli küçük ülkelerde tüm işlevler 3 kademeli <b>Merkez Kompleks</b>'te birleşir).</p>
-          <p style="margin-top:8px">🖱️ <b>Manuel Yerleştirme & Otomatik Duraklatma:</b> <b>Binalar</b> menüsünden bir bina seçtiğinizde <b>oyun otomatik durur</b> ve binayı haritada fareyle istediğiniz noktaya sol tıklayarak yerleştirirsiniz (Sağ tık = İptal).</p>
+          <p>💰 <b>Banka</b> para (<code>+12/sn</code>), ❤️ <b>Hastane</b> sağlık ve Manpower artışı sağlar. Her bölgeye en fazla <b>1 bina</b> kurulur.</p>
+          <p style="margin-top:10px">🖱️ <b>Manuel Yerleştirme & Otomatik Duraklatma:</b> <b>Binalar</b> menüsünden bir bina seçtiğinizde <b>oyun otomatik durur</b> ve binayı haritada fareyle istediğiniz noktaya sol tıklayarak yerleştirirsiniz (Sağ tık = İptal).</p>
         `,
       },
       {
         title: '3/5 — Görsel Bilim Ağacı, Fabrika & Kışla',
         body: `
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-            <img src="${rootSciUri}" style="width:44px;height:44px" alt="Bilim" />
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+            <img src="${rootSciUri}" style="width:56px;height:56px" alt="Bilim" />
             <span>🔬 <b>Üniversite (Bilim Ağacı):</b> Başlangıç düğümünden <b>Silah</b> ve <b>Kalkan</b> olarak iki dala ayrılır. İkonların altında gereken para yazar, fareyle üstüne gelince tüm statlar görünür.</span>
           </div>
           <p>⚙️ <b>Fabrika</b>'da açtığınız silah ve kalkanları üretir, 🛡️ <b>Kışla</b>'da Manpower + ekipman birleştirerek asker yetiştirirsiniz.</p>
@@ -458,9 +456,9 @@ export class GameUIController {
       {
         title: '4/5 — Ordular, Karşılaşma Popup\'ı, Hastane & Liman',
         body: `
-          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
-            <img src="${spearUri}" style="width:48px;height:44px" alt="Asker" />
-            <img src="${bazookaUri}" style="width:48px;height:44px" alt="Bazuka" />
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+            <img src="${spearUri}" style="width:60px;height:54px" alt="Asker" />
+            <img src="${bazookaUri}" style="width:60px;height:54px" alt="Bazuka" />
             <span>⚔️ Ordunuza sol tıklayınca oyun düşünmeniz için duraklatılır; gideceği hedefe sol tıklayın (Sağ tık = İptal). Ordular günde ~1 bölge hızıyla ilerler ve yalnızca durup savaştıkları/hedefledikleri bölgeyi fetheder.</span>
           </div>
           <p>🚨 <b>Karşılaşma Popup'ı:</b> Önünüze başka devletin askeri çıkarsa oyun durur; iki tarafın ikonlu birlik sayıları ve üstte <b>Diplomasi</b> sekmesiyle karar verirsiniz. Çatışmada düşenlerin <b>%30'u</b> ayakta Hastane varsa iyileşip eski ekipmanıyla döner. Kıyı ülkeleri <b>Liman</b> gemisiyle denizden asker taşır.</p>
@@ -470,7 +468,7 @@ export class GameUIController {
         title: '5/5 — Ordu Odaklanma (Q), Diplomasi & Tuş Atama',
         body: `
           <p>🎯 <b>Ordularınızı Bulma:</b> Kendi ordularınız haritada parlak ülke rengi dış çizgi ve <code>★</code> yıldızlı rozetle görünür. Üst bardaki <b>🎯 Ordum</b> butonuna veya <b>[${this.keyBindings.getDisplayLabel('cycleArmy')}]</b> tuşuna her bastığınızda kamera sırayla birliklerinizin üzerine zoomlar.</p>
-          <p style="margin-top:8px">⌨️ <b>Tuş Atama (Key Binding):</b> <b>Ayarlar</b> menüsünden tüm kısayolları değiştirebilirsiniz. Ekranda klavyeyle kontrol edilebilen herhangi bir butonun üstüne fareyle geldiğinizde atalı tuş not olarak gösterilir.</p>
+          <p style="margin-top:10px">⌨️ <b>Tuş Atama (Key Binding):</b> <b>Ayarlar</b> menüsünden tüm kısayolları değiştirebilirsiniz. Ekranda klavyeyle kontrol edilebilen herhangi bir butonun üstüne fareyle geldiğinizde atalı tuş not olarak gösterilir.</p>
         `,
       },
     ];
@@ -479,7 +477,7 @@ export class GameUIController {
 
     host.innerHTML = `
       <div class="tutorial-prompt-modal">
-        <div class="pixel-panel modal-window" style="max-width:660px">
+        <div class="pixel-panel modal-window" style="max-width:880px">
           <div class="modal-header">
             <strong>📖 Pixel World — ${cur.title}</strong>
             <button class="pixel-btn" id="btn-tut-close">✕</button>
@@ -495,11 +493,11 @@ export class GameUIController {
               )
               .join('')}
           </div>
-          <div style="line-height:1.65;font-size:13px;padding:6px 2px;min-height:140px">
+          <div style="line-height:1.7;font-size:16.5px;padding:10px 4px;min-height:185px">
             ${cur.body}
           </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;gap:8px;flex-wrap:wrap">
-            <div style="display:flex;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;gap:10px;flex-wrap:wrap">
+            <div style="display:flex;gap:10px">
               <button class="pixel-btn" id="btn-tut-prev" ${this.tutorialStep === 0 ? 'disabled' : ''}>◀ Önceki</button>
               <button class="pixel-btn" id="btn-tut-next" ${this.tutorialStep === steps.length - 1 ? 'disabled' : ''}>Sonraki ▶</button>
             </div>
@@ -790,7 +788,7 @@ export class GameUIController {
           regEl.style.display = 'block';
           const owner = this.state.countries[reg.ownerId];
           const bText = reg.building
-            ? `${BUILDINGS[reg.building.type].name}${reg.building.type === 'combined' ? ` Lv.${reg.building.level}` : ''}${reg.building.constructing ? ` (%${Math.floor((reg.building.progressSec / Math.max(0.1, reg.building.totalSec)) * 100)})` : ''}`
+            ? `${BUILDINGS[reg.building.type].name}${reg.building.constructing ? ` (%${Math.floor((reg.building.progressSec / Math.max(0.1, reg.building.totalSec)) * 100)})` : ''}`
             : 'Yok (Boş)';
           const sig = `${reg.id}_${reg.ownerId}_${bText}`;
           if (regEl.dataset.sig !== sig) {
@@ -946,7 +944,7 @@ export class GameUIController {
           📜 <b>Ülkeler Arası İlişkiler</b> — Karşılaştığınız <b>${otherCountry.name}</b> ve diğer devletlerin diplomatik durumu:
         </div>
         <div class="two-col">
-          <div class="branch-col" style="max-height:260px;overflow-y:auto">
+          <div class="branch-col" style="max-height:340px;overflow-y:auto">
             ${others
               .map((c) => {
                 const r = getRelationStatus(this.state, pid, c.id);
@@ -1136,7 +1134,7 @@ export class GameUIController {
               .map(([key, cnt]) => {
                 const splitHtml =
                   isMine && total > 1
-                    ? `<label style="font-size:10px;margin-top:2px">Ayır: <input class="pixel-input split-input" data-unit="${key}" type="number" min="0" max="${cnt}" value="0" style="width:54px;padding:2px 4px" /></label>`
+                    ? `<label style="font-size:13.5px;margin-top:4px">Ayır: <input class="pixel-input split-input" data-unit="${key}" type="number" min="0" max="${cnt}" value="0" style="width:68px;padding:4px 6px" /></label>`
                     : '';
                 return renderUnitIconCardHtml(key, cnt, owner?.color ?? '#3b82f6', splitHtml);
               })
@@ -1297,7 +1295,7 @@ export class GameUIController {
       const owned = getCountryRegions(this.state, pid);
       const hasCoastal = owned.some((r) => r.isCoastal);
 
-      const buildTypes: Exclude<BuildingType, 'combined'>[] = [
+      const buildTypes: BuildingType[] = [
         'barracks',
         'hospital',
         'bank',
@@ -1305,27 +1303,6 @@ export class GameUIController {
         'university',
         'port',
       ];
-
-      const smallUpgradeSection = p.isSmallCountry
-        ? (() => {
-            const compReg = owned.find((r) => r.building?.type === 'combined') ?? owned[0];
-            const curLv = compReg?.building?.type === 'combined' ? compReg.building.level : 0;
-            const nextCost = curLv === 0 ? BUILDINGS.combined.cost : COMBINED_UPGRADE_COSTS[curLv + 1];
-            return `
-              <div class="card-row highlight-row">
-                <div>
-                  <strong>🏛️ Merkez Kompleks (Küçük Ülke Birleşik Bina)</strong>
-                  <div class="muted">Mevcut Seviye: ${curLv}/3 — Tüm 5 binanın (kıyıysa Liman dahil) işlevini tek merkezde toplar.</div>
-                </div>
-                ${
-                  nextCost
-                    ? `<button class="pixel-btn" id="btn-upgrade-combined" data-reg="${compReg?.id ?? ''}">${curLv === 0 ? 'Kur' : 'Yükselt'} (${nextCost}💰)</button>`
-                    : `<span class="badge">MAKS</span>`
-                }
-              </div>
-            `;
-          })()
-        : '';
 
       host.innerHTML = `
         <div class="pixel-panel modal-window">
@@ -1337,7 +1314,6 @@ export class GameUIController {
           <div class="status-line">
             🖱️ Kurmak istediğiniz binayı seçin → <b>Oyun otomatik duraklatılır</b> ve binayı haritada fareyle tam istediğiniz noktaya sol tıklayarak yerleştirirsiniz (Sağ tık = İptal).
           </div>
-          ${smallUpgradeSection}
           <div class="card-list">
             ${buildTypes
               .map((bt) => {
@@ -1362,15 +1338,9 @@ export class GameUIController {
       `;
 
       host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
-      host.querySelector('#btn-upgrade-combined')?.addEventListener('click', (ev) => {
-        const regId = (ev.currentTarget as HTMLButtonElement).dataset.reg || '';
-        const res = startCombinedBuildingUpgrade(this.state, pid, regId);
-        this.lastErrorMsg = res.ok ? '' : res.error || '';
-        this.renderModal();
-      });
       host.querySelectorAll<HTMLButtonElement>('.btn-place-building').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const bt = btn.dataset.type as Exclude<BuildingType, 'combined'>;
+          const bt = btn.dataset.type as BuildingType;
           if (p.money < BUILDINGS[bt].cost) {
             this.lastErrorMsg = `Yetersiz para (${BUILDINGS[bt].cost} gerekli).`;
             this.renderModal();
@@ -1482,13 +1452,13 @@ export class GameUIController {
           <div id="modal-live-status" class="status-line"></div>
           <div class="science-tree-wrap">
             <div class="science-root-box" data-hover-tip="${rootTip}">
-              <img src="${rootUri}" style="width:44px;height:44px;image-rendering:pixelated" alt="Başlangıç" />
-              <strong style="font-size:11px">Temel Bilim</strong>
+              <img src="${rootUri}" style="width:54px;height:54px;image-rendering:pixelated" alt="Başlangıç" />
+              <strong style="font-size:14.5px">Temel Bilim</strong>
               <span class="badge">Başlangıç</span>
             </div>
-            <svg class="science-fork-svg" width="52" height="176" viewBox="0 0 52 176">
-              <path d="M 0 88 L 22 88 L 22 38 L 52 38" fill="none" stroke="#22c55e" stroke-width="4" />
-              <path d="M 0 88 L 22 88 L 22 138 L 52 138" fill="none" stroke="#38bdf8" stroke-width="4" />
+            <svg class="science-fork-svg" width="56" height="216" viewBox="0 0 56 216">
+              <path d="M 0 108 L 24 108 L 24 46 L 56 46" fill="none" stroke="#22c55e" stroke-width="5" />
+              <path d="M 0 108 L 24 108 L 24 170 L 56 170" fill="none" stroke="#38bdf8" stroke-width="5" />
             </svg>
             <div class="science-branches">
               <div class="science-branch-row">
@@ -1526,7 +1496,7 @@ export class GameUIController {
           </div>
           ${errHtml}
           <div id="modal-live-status" class="status-line"></div>
-          <div style="margin:8px 0">
+          <div style="margin:10px 0">
             Emir Adedi: <input id="prod-qty" class="pixel-input" type="number" min="1" max="500" value="10" />
           </div>
           <div class="two-col">
@@ -1537,8 +1507,8 @@ export class GameUIController {
                   const sp = WEAPONS[w];
                   return `
                     <div class="card-row">
-                      <span style="display:flex;align-items:center;gap:6px">
-                        <img src="${getTechItemSpriteDataUri('weapon', w)}" style="width:24px;height:24px" alt="" />
+                      <span style="display:flex;align-items:center;gap:10px">
+                        <img src="${getTechItemSpriteDataUri('weapon', w)}" style="width:32px;height:32px;image-rendering:pixelated" alt="" />
                         <b>${sp.name}</b> (Hasar ${sp.damage}, ${sp.prodCost}💰/ad)
                       </span>
                       <button class="pixel-btn btn-prod" data-cat="weapon" data-id="${w}">Üret</button>
@@ -1554,8 +1524,8 @@ export class GameUIController {
                   const sp = SHIELDS[s];
                   return `
                     <div class="card-row">
-                      <span style="display:flex;align-items:center;gap:6px">
-                        <img src="${getTechItemSpriteDataUri('shield', s)}" style="width:24px;height:24px" alt="" />
+                      <span style="display:flex;align-items:center;gap:10px">
+                        <img src="${getTechItemSpriteDataUri('shield', s)}" style="width:32px;height:32px;image-rendering:pixelated" alt="" />
                         <b>${sp.name}</b> (Koruma ${sp.defense}, ${sp.prodCost}💰/ad)
                       </span>
                       <button class="pixel-btn btn-prod" data-cat="shield" data-id="${s}">Üret</button>
@@ -1655,7 +1625,7 @@ export class GameUIController {
           <div class="card-list">
             <div class="card-row">
               <label for="music-vol-slider"><strong>Arka Plan Müziği Ses Seviyesi:</strong> <span id="music-vol-label">%${volPct}</span></label>
-              <input id="music-vol-slider" type="range" min="0" max="100" value="${volPct}" style="width:200px;cursor:pointer" />
+              <input id="music-vol-slider" type="range" min="0" max="100" value="${volPct}" style="width:240px;cursor:pointer" />
             </div>
             <div class="card-row">
               <span><strong>Müzik Durumu:</strong> ${muted ? '🔇 Susturuldu' : '🔊 Açık'}</span>

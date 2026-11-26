@@ -10,10 +10,10 @@ export const CALENDAR = {
 export const ARENA_CONFIG = {
   MAX_AI_COUNTRIES: 15,
   SMALL_COUNTRY_MAX_REGIONS: 4,
-  /** Target area per region in projected map squared units (1 unit ≈ 1 degree at equator) */
-  TARGET_REGION_AREA: 3.2,
-  MAX_REGIONS_PER_COUNTRY: 48,
-  LLOYD_ITERATIONS: 2,
+  /** Target area per region in projected map squared units (~38% more compact for extra building slots) */
+  TARGET_REGION_AREA: 2.0,
+  MAX_REGIONS_PER_COUNTRY: 64,
+  LLOYD_ITERATIONS: 1,
   MIN_BOX_HALF_W: 11,
   MIN_BOX_HALF_H: 7.5,
   MAX_BOX_HALF_W: 26,
@@ -93,19 +93,6 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
     coastalOnly: true,
     description: 'Kıyı bölgelerinde sınırsız kapasiteli taşıma gemisi sağlar.',
   },
-  combined: {
-    id: 'combined',
-    name: 'Merkez Kompleks',
-    cost: 150,
-    buildSec: 6,
-    alwaysActive: true,
-    description: 'Küçük ülkeler için tüm bina işlevlerini tek merkezde birleştirir.',
-  },
-};
-
-export const COMBINED_UPGRADE_COSTS: Record<number, number> = {
-  2: 250,
-  3: 400,
 };
 
 export interface WeaponSpec {
@@ -247,8 +234,8 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
 };
 
 export const COMBAT_CONFIG = {
-  LAND_MOVE_SPEED: 0.45, // ~1 region (1.8 map units) per 4 sim sec (= 1 in-game day)
-  SHIP_MOVE_SPEED: 0.6, // ~1.33x land speed
+  LAND_MOVE_SPEED: 0.36, // ~1 compact region (~1.44 map units) per 4 sim sec (= 1 in-game day)
+  SHIP_MOVE_SPEED: 0.5, // ~1.38x land speed
   MERGE_DISTANCE: 0.95,
   COMBAT_ENGAGE_DISTANCE: 0.65,
   ENCOUNTER_DETECT_DISTANCE: 1.05,
@@ -257,7 +244,7 @@ export const COMBAT_CONFIG = {
   COMBAT_TICK_SEC: 0.5,
   ESCAPE_TO_HOSPITAL_RATE: 0.3,
   HOSPITAL_HEAL_SEC: 8,
-  WOUNDED_TRAVEL_SPEED: 0.9,
+  WOUNDED_TRAVEL_SPEED: 0.78,
 } as const;
 
 export function computeCaptureDurationSec(totalSoldiers: number): number {

@@ -109,7 +109,6 @@ describe('Faz 5 — Mid-Res Pixel Art, Animasyonlar, Çevre & Müzik', () => {
       'factory',
       'university',
       'port',
-      'combined',
     ];
     for (const bt of buildings) {
       drawPixelBuilding(ctx, bt, 100, 100, '#3b82f6', false, false, 1, 200);
