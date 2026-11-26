@@ -3,9 +3,9 @@
 > Bu dosya [UPDATE_DESIGN_V1_2.md](UPDATE_DESIGN_V1_2.md) kapsamındaki tüm v1.2 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik Vitest testleri + temiz `tsc --noEmit && vite build` + `UPDATE_PROGRESS_V1_2.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 5 — 11 Adımlı `20 px` İnteraktif Spotlight Tutorial (`Banka Borç`, Kontrollü Rakip, Hastane Geri Dönüş Animasyonu) & Gerçek Chrome Uçtan Uca Doğrulama
-- **Tamamlanan Aşamalar:** 4 / 5
-- **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
+- **Aktif Aşama:** Tamamlandı (Pixel World v1.2 Hazır)
+- **Tamamlanan Aşamalar:** 5 / 5
+- **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [x] Tamamlandı
 
 ---
 
@@ -49,6 +49,6 @@
 ---
 
 ## Aşama 5 — 11 Adımlı `20 px` İnteraktif Spotlight Tutorial (`Banka Borç`, Kontrollü Rakip, Hastane Geri Dönüş Animasyonu) & Gerçek Chrome Uçtan Uca Doğrulama
-- [ ] SVG `<mask>` tabanlı `20 px` yarıçaplı açık yuvarlak + nabızlı sarı halka Spotlight motoru, hedefe göre konumlanan popup, adım bitmeden `✕` kapalı, yanlış tıklamada 2 kez kırmızı-sarı flaş, `Tutorial'ı Geç`, otomatik yumuşak kamera odaklanması, bekleme anında canlı görev rozeti
-- [ ] 11 adımlı uygulamalı akış (Ana Ekran → Ülke Seç → Amaç → Mağaza & Banka `100💰` → Banka `+500💰` Borç → Fabrika & Ekipman → Kışla & Asker → Yönlendirme → Böl & Birleştir → 2 Sayfalı Diplomasi & Savaş → Savunma [`🩹` yaralı bekler] & Saldırı [`+1000💰`] → Hastane & Yaralı Geri Dönüş Animasyonu → Final 2 seçenekli kapanış) + oyun içi `📖` Hızlı Rehber / Yeniden Başlat
-- [ ] Aşama 5 otomatik testler + temiz build + gerçek Chrome tarayıcısında tüm v1.2 özelliklerinin uçtan uca görsel doğrulaması + final `UPDATE_PROGRESS_V1_2.md` + final git commit
+- [x] SVG `<mask>` tabanlı `20 px` yarıçaplı açık yuvarlak + nabızlı sarı halka Spotlight motoru, hedefe göre konumlanan popup, adım bitmeden `✕` kapalı, yanlış tıklamada 2 kez kırmızı-sarı flaş, `Tutorial'ı Geç`, otomatik yumuşak kamera odaklanması, bekleme anında canlı görev rozeti
+- [x] 11 adımlı uygulamalı akış (Ana Ekran → Ülke Seç → Amaç → Mağaza & Banka `100💰` → Banka `+500💰` Borç → Fabrika & Ekipman → Kışla & Asker → Yönlendirme → Böl & Birleştir → 2 Sayfalı Diplomasi & Savaş → Savunma [`🩹` yaralı bekler] & Saldırı [`+1000💰`] → Hastane & Yaralı Geri Dönüş Animasyonu → Final 2 seçenekli kapanış) + oyun içi `📖` Hızlı Rehber / Yeniden Başlat
+- [x] Aşama 5 otomatik testler + temiz build + gerçek Chrome tarayıcısında tüm v1.2 özelliklerinin uçtan uca görsel doğrulaması + final `UPDATE_PROGRESS_V1_2.md` + final git commit

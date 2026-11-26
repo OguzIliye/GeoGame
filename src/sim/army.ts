@@ -1249,7 +1249,11 @@ function distributeSideCasualties(
 }
 
 /** Advance army movement, walking merges, ship sailing/landing/embarking, multi-army reinforcement combats (+10% homeland defense), hospital recovery, and region captures. */
-export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): void {
+export function tickArmiesCombatAndShips(
+  state: GameState,
+  dtSimSec: number,
+  healSpeedMult = 1,
+): void {
   if (dtSimSec <= 0 || state.phase !== 'playing') return;
 
   // 1. Move Transport Ships & land armies when reaching destination coast
@@ -1687,11 +1691,12 @@ export function tickArmiesCombatAndShips(state: GameState, dtSimSec: number): vo
       const dist = Math.max(0.2, Math.hypot(w.to[0] - w.from[0], w.to[1] - w.from[1]));
       w.travelProgress = Math.min(
         1,
-        w.travelProgress + (COMBAT_CONFIG.WOUNDED_TRAVEL_SPEED * dtSimSec) / dist,
+        w.travelProgress +
+          (COMBAT_CONFIG.WOUNDED_TRAVEL_SPEED * Math.max(1, healSpeedMult) * dtSimSec) / dist,
       );
       remainingWounded.push(w);
     } else {
-      w.healElapsedSec += dtSimSec;
+      w.healElapsedSec += dtSimSec * Math.max(1, healSpeedMult);
       if (w.healElapsedSec >= w.healRequiredSec) {
         const targetReg = state.regions[w.toRegionId];
         if (targetReg) {

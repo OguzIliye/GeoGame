@@ -44,6 +44,7 @@ import { checkEndGameConditions } from './sim/scoring';
 import { createInitialGameState, startGameWithCountry } from './state/gameStore';
 import { loadFromSlot, type SaveSlotId, saveToSlot } from './state/saveManager';
 import type { BuildingType, Point, Region, WorldCountryFeature } from './types';
+import { SpotlightTutorialController } from './ui/spotlightTutorial';
 import { GameUIController } from './ui/windows';
 
 const WORLD_BOUNDS = { minX: -172, minY: -86, maxX: 186, maxY: 66 };
@@ -121,6 +122,7 @@ async function bootstrap(): Promise<void> {
 
   function resetToWorldSelect(startTutorial = false): void {
     pendingInteractiveTutorial = startTutorial;
+    tutorial?.skipOrStop();
     clearAllAutoPauses(state);
     heldPanKeys.clear();
     state.phase = 'world_select';
@@ -170,10 +172,12 @@ async function bootstrap(): Promise<void> {
     state.placingBuildingType = type;
     state.placementHoverPoint = [camera.cx, camera.cy];
     setAutoPauseReason(state, 'building_placement', true);
-    ui.openWindow(null, false);
+    ui.openWindow(null, false, true);
     syncCursor();
     ui.syncFrame();
   }
+
+  let tutorial: SpotlightTutorialController | null = null;
 
   const ui = new GameUIController(uiLayer, state, music, keyBindings, {
     onStartWorldSelect: (startTutorial = false) => {
@@ -182,14 +186,17 @@ async function bootstrap(): Promise<void> {
     onReturnToWorld: () => resetToWorldSelect(false),
     onReturnToMainMenu: resetToMainMenu,
     onSaveAndExitToMain: (slotId: SaveSlotId) => {
+      tutorial?.skipOrStop();
       saveToSlot(slotId, state, { cx: camera.cx, cy: camera.cy, scale: camera.scale });
       resetToMainMenu();
     },
     onSaveAndExitToWorld: (slotId: SaveSlotId) => {
+      tutorial?.skipOrStop();
       saveToSlot(slotId, state, { cx: camera.cx, cy: camera.cy, scale: camera.scale });
       resetToWorldSelect(false);
     },
     onLoadSlotFromMenu: (slotId: SaveSlotId) => {
+      tutorial?.skipOrStop();
       const res = loadFromSlot(slotId, state);
       if (!res.ok) {
         ui.forceRefresh();
@@ -226,9 +233,28 @@ async function bootstrap(): Promise<void> {
         if (state.arena) camera.setBounds(state.arena, canvas.width, canvas.height, true);
         syncCursor();
         ui.forceRefresh();
+        tutorial?.start();
       } else {
         resetToWorldSelect(true);
       }
+    },
+  });
+
+  tutorial = new SpotlightTutorialController(state, camera, ui, {
+    onFinishFreshRestart: () => {
+      if (!state.playerCountryId || worldCountries.length === 0) return;
+      const cid = state.playerCountryId;
+      startGameWithCountry(state, cid, worldCountries);
+      if (state.arena) camera.setBounds(state.arena, canvas.width, canvas.height, true);
+      syncCursor();
+      ui.forceRefresh();
+    },
+    onFinishKeepPlaying: () => {
+      state.tutorialHoldWoundedWithoutHospital = false;
+      clearAllAutoPauses(state);
+      if (state.speed === 0) setGameSpeed(state, 1);
+      syncCursor();
+      ui.syncFrame();
     },
   });
 
@@ -239,16 +265,21 @@ async function bootstrap(): Promise<void> {
     state,
     camera,
     ui,
+    tutorial,
     music,
     keyBindings,
     getWorldCountries: () => worldCountries,
-    selectCountryByName: (name: string) => {
+    selectCountryByName: (name: string, withTutorial = false) => {
       const found = worldCountries.find((c) => c.name === name);
       if (!found) return false;
+      tutorial?.skipOrStop();
       startGameWithCountry(state, found.id, worldCountries, found.centroid);
       if (state.arena) camera.setBounds(state.arena, canvas.width, canvas.height, true);
       syncCursor();
       ui.forceRefresh();
+      if (withTutorial) {
+        tutorial?.start();
+      }
       return true;
     },
   };
@@ -538,7 +569,9 @@ async function bootstrap(): Promise<void> {
         }
         syncCursor();
         ui.forceRefresh();
-        void shouldRunTutorial; // Hooked up to 11-Step Spotlight Tutorial in Stage 5!
+        if (shouldRunTutorial) {
+          tutorial?.start();
+        }
       }
       return;
     }
@@ -553,6 +586,10 @@ async function bootstrap(): Promise<void> {
         pt[1] < state.arena.minY ||
         pt[1] > state.arena.maxY)
     ) {
+      if (tutorial?.isActive) {
+        tutorial.triggerWrongClickFlash();
+        return;
+      }
       clearAllTacticalModes();
       ui.syncFrame();
       return;
@@ -568,6 +605,7 @@ async function bootstrap(): Promise<void> {
       );
       if (!check.ok || !check.region) {
         pushImportantToast(state, check.reason || 'Buraya bina kurulamaz.', 'info');
+        tutorial?.triggerWrongClickFlash();
         return;
       }
       const res = startBuildingConstruction(
@@ -579,11 +617,13 @@ async function bootstrap(): Promise<void> {
       );
       if (!res.ok) {
         pushImportantToast(state, res.error || 'İnşaat başlatılamadı.', 'info');
+        tutorial?.triggerWrongClickFlash();
         return;
       }
       state.selectedRegionId = check.region.id;
       cancelBuildingPlacement();
       ui.syncFrame();
+      tutorial?.syncFrame();
       return;
     }
 
@@ -805,13 +845,18 @@ async function bootstrap(): Promise<void> {
 
     const dtSimSec = advanceClock(state, dtRealSec);
     if (dtSimSec > 0) {
-      tickEconomyAndQueues(state, dtSimSec);
-      tickAICountries(state, dtSimSec);
-      tickArmiesCombatAndShips(state, dtSimSec);
+      const tutActive = Boolean(tutorial?.isActive);
+      const speedMult = tutActive ? 3 : 1;
+      tickEconomyAndQueues(state, dtSimSec, speedMult);
+      if (!tutActive) {
+        tickAICountries(state, dtSimSec);
+      }
+      tickArmiesCombatAndShips(state, dtSimSec, speedMult);
       checkEndGameConditions(state);
     }
 
     ui.syncFrame();
+    tutorial?.syncFrame();
 
     if (state.phase === 'main_menu') {
       renderMainMenuPixelScene(ctx!, canvas.width, canvas.height, nowMs);

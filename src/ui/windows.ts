@@ -358,8 +358,8 @@ export class GameUIController {
     else this.openTutorial(0);
   }
 
-  openWindow(win: ActiveWindowId, toggle = true): void {
-    if (win === null && this.closeButtonLockedByTutorial) {
+  openWindow(win: ActiveWindowId, toggle = true, forceClose = false): void {
+    if (win === null && this.closeButtonLockedByTutorial && !forceClose) {
       return;
     }
     this.listeningKeyAction = null;
