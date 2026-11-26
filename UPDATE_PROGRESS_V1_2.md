@@ -3,8 +3,8 @@
 > Bu dosya [UPDATE_DESIGN_V1_2.md](UPDATE_DESIGN_V1_2.md) kapsamındaki tüm v1.2 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik Vitest testleri + temiz `tsc --noEmit && vite build` + `UPDATE_PROGRESS_V1_2.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 4 — RTS Kontrolleri (Kutu Seçimi + `WASD`/Sağ-Tık Pan), Evrensel Highlight, Sade HUD (`🏪 Mağaza`), İkon/Ayırıcı Çizgili Tüm Bina Popupları, 2 Sayfalı Diplomasi & 3 Slotlu Save/Continue UI
-- **Tamamlanan Aşamalar:** 3 / 5
+- **Aktif Aşama:** Aşama 5 — 11 Adımlı `20 px` İnteraktif Spotlight Tutorial (`Banka Borç`, Kontrollü Rakip, Hastane Geri Dönüş Animasyonu) & Gerçek Chrome Uçtan Uca Doğrulama
+- **Tamamlanan Aşamalar:** 4 / 5
 - **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -40,11 +40,11 @@
 ---
 
 ## Aşama 4 — RTS Kontrolleri (Kutu Seçimi + `WASD`/Sağ-Tık Pan), Evrensel Highlight, Sade HUD (`🏪 Mağaza`), İkon/Ayırıcı Çizgili Tüm Bina Popupları, 2 Sayfalı Diplomasi & 3 Slotlu Save/Continue UI
-- [ ] Sol-tık sürükle **Kutu Seçimi (Box-Select)** + sağ alt çoklu ordu birleştirme paneli; Sağ/Orta-tık sürükle + `WASD`/Ok tuşları Harita Kaydır (sağ-tık tek basış iptal)
-- [ ] Evrensel tıklama highlight'ı, kendi boş bölgesinde hızlı **Buraya Bina Kur** mini ikon menüsü, kendi binasına tıklayınca otomatik duraklatmalı (`'building_popup'`) bina işlem popup'ı + 2 tık onaylı kırmızı `🗑️ Binayı Yık`
-- [ ] Sade 3 butonlu alt dock (`🏪 Mağaza`, `📜 Diplomasi`, `🌍 Harita`), üst HUD `5 sn` canlı altın barı + borç rozeti + sol üst şeffaf **Canlı İşlem Şeridi**, haritada Kışla eğitim barı + `+X` yüzen efektler + yaralı kaçış/geri dönüş animasyonu
-- [ ] **Evrensel Popup Piksel İkon & Ayırıcı Çizgi Standardı** ile: Mağaza (ikon+isim+fiyat), Banka (borç), Üniversite (Bilim Ağacı), Hastane (iyileşen/yoldaki asker), İkonlu Kışla (`MAX` + isimsiz hover ikon + `+1/+5/+10/MAX`), İkonlu Paralel Fabrika (alt toplam maliyet + kapanmayan popup'ta ayrı loading bar'lar), Ordu (`50/50` + `Geri Çekil`), 2 Sayfalı 7-aksiyonlu Diplomasi, 3 Slotlu Kaydet & Çık + Ana Ekran `▶ Continue`
-- [ ] Aşama 4 otomatik testler + temiz build + `UPDATE_PROGRESS_V1_2.md` güncellemesi + git commit
+- [x] Sol-tık sürükle **Kutu Seçimi (Box-Select)** + sağ alt çoklu ordu birleştirme paneli; Sağ/Orta-tık sürükle + `WASD`/Ok tuşları Harita Kaydır (sağ-tık tek basış iptal)
+- [x] Evrensel tıklama highlight'ı, kendi boş bölgesinde hızlı **Buraya Bina Kur** mini ikon menüsü, kendi binasına tıklayınca otomatik duraklatmalı (`'building_popup'`) bina işlem popup'ı + 2 tık onaylı kırmızı `🗑️ Binayı Yık`
+- [x] Sade 3 butonlu alt dock (`🏪 Mağaza`, `📜 Diplomasi`, `🌍 Harita`), üst HUD `5 sn` canlı altın barı + borç rozeti + sol üst şeffaf **Canlı İşlem Şeridi**, haritada Kışla eğitim barı + `+X` yüzen efektler + yaralı kaçış/geri dönüş animasyonu
+- [x] **Evrensel Popup Piksel İkon & Ayırıcı Çizgi Standardı** ile: Mağaza (ikon+isim+fiyat), Banka (borç), Üniversite (Bilim Ağacı), Hastane (iyileşen/yoldaki asker), İkonlu Kışla (`MAX` + isimsiz hover ikon + `+1/+5/+10/MAX`), İkonlu Paralel Fabrika (alt toplam maliyet + kapanmayan popup'ta ayrı loading bar'lar), Ordu (`50/50` + `Geri Çekil`), 2 Sayfalı 7-aksiyonlu Diplomasi, 3 Slotlu Kaydet & Çık + Ana Ekran `▶ Continue`
+- [x] Aşama 4 otomatik testler + temiz build + `UPDATE_PROGRESS_V1_2.md` güncellemesi + git commit
 
 ---
 

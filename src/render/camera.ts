@@ -70,6 +70,16 @@ export class MapCamera {
     this.clampTargets();
   }
 
+  restoreView(cx: number, cy: number, scale: number): void {
+    this.targetCx = cx;
+    this.targetCy = cy;
+    this.targetScale = scale;
+    this.clampTargets();
+    this.cx = this.targetCx;
+    this.cy = this.targetCy;
+    this.scale = this.targetScale;
+  }
+
   mapToScreen(mx: number, my: number, viewW: number, viewH: number): Point {
     return [
       (mx - this.cx) * this.scale + viewW * 0.5,

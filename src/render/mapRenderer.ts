@@ -11,6 +11,7 @@ import { BUILDINGS } from '../config/balance';
 import { minDistToMultiPolygonSq } from '../map/geometry';
 import { getMaxTierVisualsForUnits, getTotalSoldiers } from '../sim/army';
 import {
+  getBarracksTrainingProgress,
   getRegionBuildingPoint,
   isBuildingWorking,
   validateBuildingPlacementAtPoint,
@@ -245,7 +246,6 @@ export function drawAnimatedRouteArrow(
   ctx.closePath();
   ctx.fill();
 
-  // Animated traveling chevron along the route
   const targetDist = ((realTimeMs % 1200) / 1200) * totalLen;
   let acc = 0;
   for (let i = 0; i < segLens.length; i++) {
@@ -303,6 +303,8 @@ export function renderRegionalTheater(
 
   const regionList = Object.values(state.regions);
   const spriteStep = computeWorldSpritePixelStep(camera.scale);
+  const selectedArmySet = new Set(state.selectedArmyIds ?? []);
+  if (state.selectedArmyId) selectedArmySet.add(state.selectedArmyId);
 
   const placementCheck =
     state.placingBuildingType && state.placementHoverPoint && state.playerCountryId
@@ -342,7 +344,7 @@ export function renderRegionalTheater(
     ctx.stroke();
   }
 
-  // 1.5 Thick (3.8px) Country Outer Borders + Selected/Hovered Region Highlight
+  // 1.5 Thick (3.8px) Country Outer Borders + Universal Selected/Hovered Region Highlight
   const borders = getCountryOuterBorders(state, regionList);
   if (borders.allOuterSegments.length > 0) {
     ctx.save();
@@ -375,20 +377,20 @@ export function renderRegionalTheater(
   }
 
   for (const reg of regionList) {
-    const isSelected = reg.id === state.selectedRegionId;
+    const isSelected = reg.id === state.selectedRegionId || reg.id === state.activeBuildingRegionId;
     const isHoveredPlacement = placementCheck?.region?.id === reg.id;
     if (!isSelected && !isHoveredPlacement) continue;
     traceMultiPolygon(ctx, reg.polygons, camera, viewW, viewH);
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.2;
     ctx.strokeStyle = isHoveredPlacement
       ? placementCheck?.ok
         ? '#4ade80'
         : '#f87171'
-      : '#fde047';
+      : '#38bdf8';
     ctx.stroke();
   }
 
-  // 2. Mid-res pixel-art environment props (world-space scaled!)
+  // 2. Compact pixel-art environment props
   const cullMargin = Math.max(40, spriteStep * 20);
   for (const reg of regionList) {
     for (const prop of reg.props) {
@@ -400,7 +402,7 @@ export function renderRegionalTheater(
     }
   }
 
-  // 3. Pixel-art Buildings at their actual (x, y) coordinates + Country-color outline + World-space zoom!
+  // 3. Pixel-art Buildings + Universal Building Highlight + On-Map Barracks Training Bar!
   for (const reg of regionList) {
     const owner = state.countries[reg.ownerId];
 
@@ -410,6 +412,20 @@ export function renderRegionalTheater(
       const [bx, by] = camera.mapToScreen(bMapX, bMapY, viewW, viewH);
       const working = isBuildingWorking(state, owner, reg);
       const pct = b.totalSec > 0 ? Math.min(1, b.progressSec / b.totalSec) : 1;
+
+      if (state.activeBuildingRegionId === reg.id) {
+        const frameHalf = Math.max(18, Math.round(14 * spriteStep));
+        ctx.save();
+        ctx.strokeStyle = '#fde047';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(
+          Math.round(bx - frameHalf),
+          Math.round(by - frameHalf - 2),
+          frameHalf * 2,
+          frameHalf * 2,
+        );
+        ctx.restore();
+      }
 
       drawPixelBuilding(
         ctx,
@@ -423,6 +439,26 @@ export function renderRegionalTheater(
         realTimeMs,
         camera.scale,
       );
+
+      // Live Barracks training bar right above the Barracks on the map!
+      if (b.type === 'barracks' && !b.constructing) {
+        const trainProg = getBarracksTrainingProgress(b);
+        if (trainProg.active) {
+          const barW = 36;
+          const barH = 6;
+          const barX = Math.round(bx - barW * 0.5);
+          const barY = Math.round(by - 15 * spriteStep - 10);
+          ctx.save();
+          ctx.fillStyle = '#090d16';
+          ctx.fillRect(barX, barY, barW, barH);
+          ctx.fillStyle = '#4ade80';
+          ctx.fillRect(barX + 1, barY + 1, Math.round((barW - 2) * trainProg.pct), barH - 2);
+          ctx.strokeStyle = '#fef08a';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(barX, barY, barW, barH);
+          ctx.restore();
+        }
+      }
 
       if (camera.scale >= 16) {
         const label = BUILDING_SHORT[b.type] ?? BUILDINGS[b.type].name.slice(0, 3);
@@ -465,7 +501,12 @@ export function renderRegionalTheater(
             ];
       const screenPts = routeMapPts.map(([mx, my]) => camera.mapToScreen(mx, my, viewW, viewH));
       const isPlayer = army.countryId === state.playerCountryId;
-      drawAnimatedRouteArrow(ctx, screenPts, isPlayer ? '#fde047' : '#fca5a5', realTimeMs);
+      const arrowColor = army.mergeTargetArmyId
+        ? '#38bdf8'
+        : isPlayer
+          ? '#fde047'
+          : '#fca5a5';
+      drawAnimatedRouteArrow(ctx, screenPts, arrowColor, realTimeMs);
     }
   }
 
@@ -477,7 +518,7 @@ export function renderRegionalTheater(
     }
   }
 
-  // 5. Pixel-art Transport Ships on sea (world-space scaled!)
+  // 5. Pixel-art Transport Ships on sea
   for (const ship of Object.values(state.ships)) {
     const owner = state.countries[ship.countryId];
     if (!owner) continue;
@@ -500,22 +541,63 @@ export function renderRegionalTheater(
     }
   }
 
-  // 6. Wounded soldiers retreating to Hospital
+  // 6. Wounded Soldiers: Field-Waiting (`🩹 Yaralı — Hastane Bekliyor`) OR Dashed Trail + Red-Cross Running Figure!
   for (const w of state.wounded) {
-    const wx = w.from[0] + (w.to[0] - w.from[0]) * w.travelProgress;
-    const wy = w.from[1] + (w.to[1] - w.from[1]) * w.travelProgress;
-    const [sx, sy] = camera.mapToScreen(wx, wy, viewW, viewH);
-    const r = Math.max(5, Math.round(spriteStep * 2.5));
-    ctx.save();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(Math.round(sx - r), Math.round(sy - r), r * 2, r * 2);
-    ctx.fillStyle = '#ef4444';
-    ctx.fillRect(Math.round(sx - 1), Math.round(sy - r + 1), 2, r * 2 - 2);
-    ctx.fillRect(Math.round(sx - r + 1), Math.round(sy - 1), r * 2 - 2, 2);
-    ctx.restore();
+    const ownerColor = state.countries[w.countryId]?.color ?? '#3b82f6';
+    const wCount = getTotalSoldiers(w.units);
+    const { weapon, shield } = getMaxTierVisualsForUnits(w.units);
+
+    if (w.waitingForHospital) {
+      const [sx, sy] = camera.mapToScreen(w.from[0], w.from[1], viewW, viewH);
+      drawPixelArmyUnit(ctx, sx, sy, weapon, shield, 'idle', true, ownerColor, realTimeMs, camera.scale * 0.85);
+      drawRedCrossBadge(ctx, sx + 10, sy - 12, spriteStep);
+      drawPixelTag(
+        ctx,
+        `🩹 Yaralı (${wCount}) — Hastane Bekliyor`,
+        sx,
+        sy - 24,
+        '#fecaca',
+        'rgba(127, 29, 29, 0.94)',
+        '#f87171',
+      );
+      continue;
+    }
+
+    if (w.travelProgress < 1) {
+      const wx = w.from[0] + (w.to[0] - w.from[0]) * w.travelProgress;
+      const wy = w.from[1] + (w.to[1] - w.from[1]) * w.travelProgress;
+      const [sx, sy] = camera.mapToScreen(wx, wy, viewW, viewH);
+      const [hx, hy] = camera.mapToScreen(w.to[0], w.to[1], viewW, viewH);
+
+      // Dashed green/white rescue trail toward the Hospital
+      ctx.save();
+      ctx.strokeStyle = '#86efac';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.lineDashOffset = -((realTimeMs * 0.05) % 10);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(sx), Math.round(sy));
+      ctx.lineTo(Math.round(hx), Math.round(hy));
+      ctx.stroke();
+      ctx.restore();
+
+      drawPixelArmyUnit(
+        ctx,
+        sx,
+        sy,
+        weapon,
+        shield,
+        'walk',
+        w.to[0] >= wx,
+        ownerColor,
+        realTimeMs,
+        camera.scale * 0.82,
+      );
+      drawRedCrossBadge(ctx, sx, sy - 14 * spriteStep - 4, spriteStep);
+    }
   }
 
-  // 7. Army Stacks — AI first, Player on top Z-order for maximum clarity!
+  // 7. Army Stacks — AI first, Player on top Z-order
   const sortedArmies = Object.values(state.armies).sort((a, b) => {
     const ap = a.countryId === state.playerCountryId ? 1 : 0;
     const bp = b.countryId === state.playerCountryId ? 1 : 0;
@@ -529,7 +611,7 @@ export function renderRegionalTheater(
     if (count <= 0) continue;
 
     const [ax, ay] = camera.mapToScreen(army.x, army.y, viewW, viewH);
-    const isSel = army.id === state.selectedArmyId;
+    const isSel = selectedArmySet.has(army.id);
     const { weapon, shield } = getMaxTierVisualsForUnits(army.units);
 
     let pose: SoldierPose = 'idle';
@@ -542,13 +624,12 @@ export function renderRegionalTheater(
       facingRight = army.targetX >= army.x;
     }
 
-    // Distinct pulsing ground beacon for ALL player armies so you never lose track of your forces!
     if (owner.isPlayer) {
       const pulse = 1 + 0.14 * Math.sin(realTimeMs * 0.006);
-      const ringW = Math.max(22, Math.round(22 * spriteStep * pulse));
-      const ringH = Math.max(9, Math.round(8 * spriteStep * pulse));
+      const ringW = Math.max(20, Math.round(22 * spriteStep * pulse));
+      const ringH = Math.max(8, Math.round(8 * spriteStep * pulse));
       ctx.save();
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.24)';
+      ctx.fillStyle = isSel ? 'rgba(250, 204, 21, 0.28)' : 'rgba(56, 189, 248, 0.24)';
       ctx.fillRect(Math.round(ax - ringW * 0.5), Math.round(ay + 4 * spriteStep), ringW, ringH);
       ctx.strokeStyle = isSel ? '#fde047' : '#38bdf8';
       ctx.lineWidth = 2;
@@ -557,10 +638,10 @@ export function renderRegionalTheater(
     }
 
     if (isSel) {
-      const boxHalf = Math.max(18, Math.round(14 * spriteStep));
+      const boxHalf = Math.max(16, Math.round(14 * spriteStep));
       ctx.save();
       ctx.strokeStyle = '#fde047';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
       ctx.strokeRect(
         Math.round(ax - boxHalf),
         Math.round(ay - boxHalf * 1.15),
@@ -587,14 +668,14 @@ export function renderRegionalTheater(
       ctx,
       owner.isPlayer ? `★ ${count}` : `${count}`,
       ax,
-      ay + Math.max(18, Math.round(11 * spriteStep + 8)),
+      ay + Math.max(16, Math.round(11 * spriteStep + 8)),
       owner.isPlayer ? '#fef08a' : '#ffffff',
       owner.isPlayer ? '#1e3a8a' : 'rgba(15, 23, 42, 0.92)',
       owner.isPlayer ? '#facc15' : '#475569',
     );
   }
 
-  // 7.5 Q-Focus Ping Ring Animation around focused player army/ship
+  // 7.5 Q-Focus Ping Ring Animation
   if (state.focusPing) {
     const nowRef = state.focusPing.startedRealMs > 1e11 ? Date.now() : realTimeMs;
     const elapsed = nowRef - state.focusPing.startedRealMs;
@@ -637,6 +718,30 @@ export function renderRegionalTheater(
       'rgba(15, 23, 42, 0.78)',
       country.isPlayer ? '#eab308' : '#334155',
     );
+  }
+
+  // 8.5 Floating World Effects (`+X Asker`, `+1000 💰`, `+X İyileşti!`)
+  if (state.floatingEffects && state.floatingEffects.length > 0) {
+    const nowEpoch = Date.now();
+    for (const fx of state.floatingEffects) {
+      if (fx.scope !== 'world' || fx.x === undefined || fx.y === undefined) continue;
+      const age = nowEpoch - fx.createdAtRealMs;
+      if (age < 0 || age > fx.durationMs) continue;
+      const t = age / fx.durationMs;
+      const [sx, sy] = camera.mapToScreen(fx.x, fx.y, viewW, viewH);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - t * 0.85);
+      drawPixelTag(
+        ctx,
+        fx.text,
+        sx,
+        sy - 18 - t * 28,
+        fx.color,
+        'rgba(9, 13, 22, 0.92)',
+        fx.color,
+      );
+      ctx.restore();
+    }
   }
 
   // 9. Interactive Mouse Building Placement Ghost Preview
@@ -686,6 +791,42 @@ export function renderRegionalTheater(
       isOk ? '#4ade80' : '#ef4444',
     );
   }
+
+  // 10. Left-Drag RTS Box-Select Rectangle
+  if (state.boxSelectRect) {
+    const rx = Math.round(Math.min(state.boxSelectRect.x1, state.boxSelectRect.x2));
+    const ry = Math.round(Math.min(state.boxSelectRect.y1, state.boxSelectRect.y2));
+    const rw = Math.round(Math.abs(state.boxSelectRect.x2 - state.boxSelectRect.x1));
+    const rh = Math.round(Math.abs(state.boxSelectRect.y2 - state.boxSelectRect.y1));
+    if (rw >= 2 || rh >= 2) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(250, 204, 21, 0.14)';
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = '#facc15';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rx, ry, rw, rh);
+      ctx.restore();
+    }
+  }
+}
+
+function drawRedCrossBadge(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  spriteStep: number,
+): void {
+  const r = Math.max(5, Math.round(spriteStep * 2.8));
+  ctx.save();
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(Math.round(sx - r), Math.round(sy - r), r * 2, r * 2);
+  ctx.strokeStyle = '#090d16';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(Math.round(sx - r), Math.round(sy - r), r * 2, r * 2);
+  ctx.fillStyle = '#ef4444';
+  ctx.fillRect(Math.round(sx - 1), Math.round(sy - r + 1), 2, r * 2 - 2);
+  ctx.fillRect(Math.round(sx - r + 1), Math.round(sy - 1), r * 2 - 2, 2);
+  ctx.restore();
 }
 
 export function drawPixelTag(
