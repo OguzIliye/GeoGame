@@ -58,11 +58,12 @@ describe('Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu', () => {
     const state = structuredClone(baseTurkeyState);
     const rng = createRng('phase4_ai_seed');
 
-    // 90 simülasyon saniyesi çalıştır -> AI ülkeler bina kurmalı, ekipman üretmeli ve ordu çıkarmalı
+    // 90 simülasyon saniyesi (22.5 oyun günü) çalıştır -> 3. günden sonra AI ülkeler Banka->Fabrika->Kışla kurup ekipman üreterek ordu çıkarmalı
     for (let t = 0; t < 90; t++) {
-      tickEconomyAndQueues(state, 1);
-      tickAICountries(state, 1, rng);
-      tickArmiesCombatAndShips(state, 1);
+      const dt = advanceClock(state, 1);
+      tickEconomyAndQueues(state, dt);
+      tickAICountries(state, dt, rng);
+      tickArmiesCombatAndShips(state, dt);
     }
 
     const aiArmies = Object.values(state.armies).filter((a) => a.countryId !== turkeyFeature.id);

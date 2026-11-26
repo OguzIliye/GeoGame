@@ -39,6 +39,8 @@ export interface BuildingSlot {
   totalSec: number;
   x?: number;
   y?: number;
+  parallelProduction?: ProductionOrder[];
+  trainingQueue?: TrainingOrder[];
 }
 
 export interface TerrainProp {
@@ -73,7 +75,7 @@ export interface Region {
 export interface ProductionOrder {
   id: string;
   category: 'weapon' | 'shield';
-  itemId: WeaponId | ShieldId;
+  itemId: WeaponId | Exclude<ShieldId, 'none'>;
   remainingCount: number;
   progressSec: number;
   unitTimeSec: number;
@@ -118,6 +120,9 @@ export interface Country {
 
   money: number;
   manpower: number;
+  debt: number;
+  incomeTickAccSec: number;
+  lastIncomeNet?: number;
 
   weaponsStock: Record<WeaponId, number>;
   shieldsStock: Record<Exclude<ShieldId, 'none'>, number>;
@@ -125,9 +130,6 @@ export interface Country {
   unlockedWeapons: WeaponId[];
   unlockedShields: Exclude<ShieldId, 'none'>[];
   activeResearch: ActiveResearch | null;
-
-  productionQueue: ProductionOrder[];
-  trainingQueue: TrainingOrder[];
 }
 
 export interface ArmyStack {
@@ -196,6 +198,18 @@ export interface FocusPing {
   startedRealMs: number;
 }
 
+export interface FloatingEffect {
+  id: string;
+  text: string;
+  color: string;
+  scope: 'hud_money' | 'world';
+  x?: number;
+  y?: number;
+  count?: number;
+  createdAtRealMs: number;
+  durationMs: number;
+}
+
 export type GamePhase = 'main_menu' | 'world_select' | 'playing' | 'ended';
 export type SpeedMultiplier = 0 | 0.5 | 1 | 2;
 
@@ -234,6 +248,7 @@ export interface GameState {
   tutorialSeen: boolean;
   tutorialPromptOpen: boolean;
 
+  floatingEffects: FloatingEffect[];
   toasts: ImportantToast[];
   endReason: 'victory_domination' | 'date_reached' | 'defeat_eliminated' | null;
 }

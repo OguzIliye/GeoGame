@@ -21,16 +21,32 @@ export const ARENA_CONFIG = {
 } as const;
 
 export const ECONOMY = {
-  START_MONEY: 300,
+  START_MONEY: 100,
   START_MANPOWER: 50,
   BASE_HEALTH_PCT: 50,
   MAX_HEALTH_PCT: 100,
   BASE_MONEY_PER_SEC: 5,
   BASE_MANPOWER_PER_SEC: 1,
   BANK_MONEY_PER_SEC: 12,
+  INCOME_TICK_SEC: 5,
+  MAX_UNIVERSITIES: 1,
+  DEMOLISH_REFUND_RATE: 0.5,
+  REGION_CAPTURE_BONUS: 1000,
   HOSPITAL_HEALTH_BONUS_PCT: 15,
   HOSPITAL_MANPOWER_PER_SEC: 2,
   BARRACKS_TRAIN_SEC_PER_SOLDIER: 0.4,
+} as const;
+
+export const LOAN_CONFIG = {
+  OPTIONS: [500, 1000, 10000] as const,
+  INTEREST_RATE: 0.15,
+  AUTO_DEDUCT_RATE: 0.25,
+  MAX_DEBT: 20000,
+} as const;
+
+export const AI_CONFIG = {
+  STARTUP_DELAY_DAYS: 3,
+  PEACEFUL_DEV_UNTIL_DAYS: 7,
 } as const;
 
 export interface BuildingSpec {
@@ -50,7 +66,7 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
     cost: 160,
     buildSec: 6,
     alwaysActive: false,
-    description: 'Manpower ve ekipman stoğu ile asker yetiştirir.',
+    description: 'Manpower ve ekipman stoğu ile kendi konumunda asker yetiştirir.',
   },
   hospital: {
     id: 'hospital',
@@ -63,10 +79,10 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
   bank: {
     id: 'bank',
     name: 'Banka',
-    cost: 150,
+    cost: 100,
     buildSec: 6,
     alwaysActive: true,
-    description: 'Sürekli çalışır ve +12 para/sn üretir.',
+    description: 'Sürekli çalışır, her 5 sn\'de +60 para üretir ve kredi sağlar.',
   },
   factory: {
     id: 'factory',
@@ -74,7 +90,7 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
     cost: 180,
     buildSec: 7,
     alwaysActive: false,
-    description: 'Açılmış teknolojilere göre silah ve kalkan üretir.',
+    description: 'Açılmış teknolojilere göre paralel hatlarda silah ve kalkan üretir.',
   },
   university: {
     id: 'university',
@@ -82,7 +98,7 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
     cost: 220,
     buildSec: 8,
     alwaysActive: false,
-    description: 'Silah ve kalkan teknoloji ağacını araştırır.',
+    description: 'Silah ve kalkan teknoloji ağacını araştırır (Ülke başına maks. 1).',
   },
   port: {
     id: 'port',
@@ -117,7 +133,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     researchCost: 0,
     researchSec: 0,
     prodCost: 5,
-    prodSec: 0.6,
+    prodSec: 2,
   },
   spear: {
     id: 'spear',
@@ -127,7 +143,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     researchCost: 200,
     researchSec: 12,
     prodCost: 8,
-    prodSec: 0.8,
+    prodSec: 4,
   },
   pistol: {
     id: 'pistol',
@@ -137,7 +153,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     researchCost: 400,
     researchSec: 18,
     prodCost: 12,
-    prodSec: 1.0,
+    prodSec: 7,
   },
   ak: {
     id: 'ak',
@@ -147,7 +163,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     researchCost: 750,
     researchSec: 25,
     prodCost: 18,
-    prodSec: 1.2,
+    prodSec: 11,
   },
   bazooka: {
     id: 'bazooka',
@@ -157,7 +173,7 @@ export const WEAPONS: Record<WeaponId, WeaponSpec> = {
     researchCost: 1200,
     researchSec: 35,
     prodCost: 28,
-    prodSec: 1.6,
+    prodSec: 15,
   },
 };
 
@@ -189,7 +205,7 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
     researchCost: 0,
     researchSec: 0,
     prodCost: 4,
-    prodSec: 0.5,
+    prodSec: 2,
   },
   bronze: {
     id: 'bronze',
@@ -199,7 +215,7 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
     researchCost: 180,
     researchSec: 12,
     prodCost: 7,
-    prodSec: 0.7,
+    prodSec: 4,
   },
   steel: {
     id: 'steel',
@@ -209,7 +225,7 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
     researchCost: 360,
     researchSec: 18,
     prodCost: 11,
-    prodSec: 0.9,
+    prodSec: 7,
   },
   diamond: {
     id: 'diamond',
@@ -219,7 +235,7 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
     researchCost: 700,
     researchSec: 25,
     prodCost: 17,
-    prodSec: 1.2,
+    prodSec: 11,
   },
   forcefield: {
     id: 'forcefield',
@@ -229,7 +245,7 @@ export const SHIELDS: Record<Exclude<ShieldId, 'none'>, ShieldSpec> = {
     researchCost: 1150,
     researchSec: 35,
     prodCost: 26,
-    prodSec: 1.5,
+    prodSec: 15,
   },
 };
 

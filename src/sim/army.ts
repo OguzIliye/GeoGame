@@ -776,8 +776,6 @@ function handleRegionCaptured(state: GameState, reg: Region, newOwnerId: string)
   if (prevRemaining.length === 0 && state.countries[prevOwnerId]) {
     const eliminatedCountry = state.countries[prevOwnerId];
     eliminatedCountry.eliminated = true;
-    eliminatedCountry.productionQueue = [];
-    eliminatedCountry.trainingQueue = [];
     eliminatedCountry.activeResearch = null;
 
     // Remove eliminated country's remaining armies/ships/wounded

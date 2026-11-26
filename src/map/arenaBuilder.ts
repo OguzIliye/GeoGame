@@ -1,6 +1,6 @@
 import { Delaunay } from 'd3-delaunay';
 import polygonClipping from 'polygon-clipping';
-import { ARENA_CONFIG, COUNTRY_PALETTE } from '../config/balance';
+import { ARENA_CONFIG, COUNTRY_PALETTE, ECONOMY } from '../config/balance';
 import type {
   AIPersonality,
   ArenaBounds,
@@ -444,15 +444,15 @@ export function buildRegionalTheater(
       eliminated: false,
       personality,
       nextAiThinkSec: 2 + rng() * 2,
-      money: 300,
-      manpower: 50,
+      money: ECONOMY.START_MONEY,
+      manpower: ECONOMY.START_MANPOWER,
+      debt: 0,
+      incomeTickAccSec: 0,
       weaponsStock: { sword: 0, spear: 0, pistol: 0, ak: 0, bazooka: 0 },
       shieldsStock: { wood: 0, bronze: 0, steel: 0, diamond: 0, forcefield: 0 },
       unlockedWeapons: ['sword'],
       unlockedShields: ['wood'],
       activeResearch: null,
-      productionQueue: [],
-      trainingQueue: [],
     };
 
     subPolys.forEach((rmp, rIdx) => {

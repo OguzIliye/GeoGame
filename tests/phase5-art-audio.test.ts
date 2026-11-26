@@ -73,24 +73,34 @@ describe('Faz 5 — Mid-Res Pixel Art, Animasyonlar, Çevre & Müzik', () => {
     expect(music.getVolume()).toBe(0);
   });
 
-  it('Banka ve Birleşik Binayı her zaman çalışır (active), diğer binaları ise aktif işe göre idle/çalışır döndürür', () => {
+  it('Bankayı her zaman çalışır (active), diğer binaları ise aktif işe göre idle/çalışır döndürür', () => {
     const state = structuredClone(baseTurkeyState);
     const p = state.countries[turkey.id];
+    p.money = 500;
     const owned = getCountryRegions(state, turkey.id);
+    const emptyRegs = owned.filter((r) => !r.building);
 
-    const bankReg = owned.find((r) => r.building?.type === 'bank')!;
+    const bankReg = emptyRegs[0];
+    bankReg.building = {
+      type: 'bank',
+      level: 1,
+      constructing: false,
+      progressSec: 0,
+      totalSec: 0,
+    };
     expect(isBuildingWorking(state, p, bankReg)).toBe(true);
 
-    const facReg = owned.find((r) => !r.building)!;
+    const facReg = emptyRegs[1];
     facReg.building = {
       type: 'factory',
       level: 1,
       constructing: false,
       progressSec: 0,
       totalSec: 0,
+      parallelProduction: [],
     };
     expect(isBuildingWorking(state, p, facReg)).toBe(false);
-    queueFactoryProduction(state, turkey.id, 'weapon', 'sword', 2);
+    queueFactoryProduction(state, turkey.id, 'weapon', 'sword', 2, facReg.id);
     expect(isBuildingWorking(state, p, facReg)).toBe(true);
   });
 

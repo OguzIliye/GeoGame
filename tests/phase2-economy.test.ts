@@ -48,12 +48,13 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     const pid = turkey.id;
     const player = state.countries[pid];
 
-    expect(getCountryMoneyPerSec(state, pid)).toBe(17);
+    expect(getCountryMoneyPerSec(state, pid)).toBe(5);
     expect(getCountryHealthPct(state, pid)).toBe(50);
     expect(getCountryManpowerPerSec(state, pid)).toBe(1);
 
     const owned = getCountryRegions(state, pid);
     const occupied = owned.find((r) => r.building !== null)!;
+    expect(occupied.building?.type).toBe('university');
     expect(startBuildingConstruction(state, pid, occupied.id, 'bank').ok).toBe(false);
 
     const inland = owned.find((r) => !r.isCoastal && !r.building);
@@ -88,9 +89,11 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     player.money = 5000;
     player.manpower = 100;
 
+    // Başlangıçta zaten 1 Üniversite var (MAX_UNIVERSITIES = 1); Fabrika ve Kışla kuralım
     const emptyRegs = getCountryRegions(state, pid).filter((r) => !r.building);
-    expect(startBuildingConstruction(state, pid, emptyRegs[0].id, 'university').ok).toBe(true);
-    expect(startBuildingConstruction(state, pid, emptyRegs[1].id, 'factory').ok).toBe(true);
+    expect(startBuildingConstruction(state, pid, emptyRegs[0].id, 'university').ok).toBe(false);
+    expect(startBuildingConstruction(state, pid, emptyRegs[0].id, 'factory').ok).toBe(true);
+    expect(startBuildingConstruction(state, pid, emptyRegs[1].id, 'barracks').ok).toBe(true);
     tickEconomyAndQueues(state, 9); // Binalar tamamlanır
 
     // Üniversitede Mızrak araştırması -> bitince kritik bildirim (toast) çıkar
@@ -101,10 +104,10 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
 
     const toastCountBeforeRoutine = state.toasts.length;
 
-    // Fabrikada 5 Mızrak + 5 Tahta Kalkan üretimi (rutin -> toast üretmez)
+    // Fabrikada paralel 5 Mızrak (4sn/ad = 20sn) + 5 Tahta Kalkan (2sn/ad = 10sn) üretimi (rutin -> toast üretmez)
     expect(queueFactoryProduction(state, pid, 'weapon', 'spear', 5).ok).toBe(true);
     expect(queueFactoryProduction(state, pid, 'shield', 'wood', 5).ok).toBe(true);
-    tickEconomyAndQueues(state, 10);
+    tickEconomyAndQueues(state, 20.5);
     expect(player.weaponsStock.spear).toBe(5);
     expect(player.shieldsStock.wood).toBe(5);
     expect(state.toasts.length).toBe(toastCountBeforeRoutine);

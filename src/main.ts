@@ -86,6 +86,7 @@ async function bootstrap(): Promise<void> {
     state.armies = {};
     state.ships = {};
     state.wounded = [];
+    state.floatingEffects = [];
     state.activeEncounter = null;
     state.placingBuildingType = null;
     state.placementHoverPoint = null;

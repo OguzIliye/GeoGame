@@ -3,8 +3,8 @@
 > Bu dosya [UPDATE_DESIGN_V1_2.md](UPDATE_DESIGN_V1_2.md) kapsamındaki tüm v1.2 özelliklerinin aşama aşama geliştirme ve doğrulama durumunu takip eder. Her aşama tamamlandığında **otomatik Vitest testleri + temiz `tsc --noEmit && vite build` + `UPDATE_PROGRESS_V1_2.md` güncellemesi + `git commit`** yapılır.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 2 — Ekonomi & Bina-Bazlı Bağımsız Üretim Motoru (`100💰`, Tek Üniversite, `5 sn` Gelir, Banka Borç, Bina Yıkma, Paralel Fabrika `2–15 sn`, Kışla `min` Formülü & AI `3/7` Gün Gecikmesi)
-- **Tamamlanan Aşamalar:** 1 / 5
+- **Aktif Aşama:** Aşama 3 — Taktiksel Savaş, 7 Aksiyonlu Diplomasi, RTS Çoklu Ordu / Birleştirme & 3 Slotlu Save/Continue Motoru
+- **Tamamlanan Aşamalar:** 2 / 5
 - **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -20,12 +20,12 @@
 ---
 
 ## Aşama 2 — Ekonomi & Bina-Bazlı Bağımsız Üretim Motoru (`100💰`, Tek Üniversite, `5 sn` Gelir, Banka Borç, Bina Yıkma, Paralel Fabrika `2–15 sn`, Kışla `min` Formülü & AI `3/7` Gün Gecikmesi)
-- [ ] Yeni başlangıç kuralı (`START_MONEY = 100`, `BUILDINGS.bank.cost = 100`, başlangıçta yalnızca `1 Üniversite`, `MAX_UNIVERSITIES = 1`, asker bakım maliyeti yok)
-- [ ] `5 sn`'de bir toplu gelir (`INCOME_TICK_SEC = 5`), Banka borç sistemi (`500 / 1.000 / 10.000`, `%15` faiz, `%25` otomatik kesinti, `20.000` tavan, `repayBankLoan`), `demolishBuilding` (`%50` iade)
-- [ ] Bina-bazlı bağımsız paralel Fabrika üretim hatları (`BuildingSlot.parallelProduction`, `2 / 4 / 7 / 11 / 15 sn` kademeli süreler)
-- [ ] Bina-bazlı bağımsız Kışla eğitimi (`BuildingSlot.trainingQueue`), ortak `min` kıt kaynak formülü (kalkan opsiyonel) ve askerlerin üretildiği Kışlanın yanında doğması
-- [ ] AI başlangıç gecikmesi (`3` gün tam bekleme, `7.` güne kadar barışçıl gelişim) ve bina-bazlı ekipman → asker zincirine tam uyum
-- [ ] Aşama 2 otomatik testler + temiz build + `UPDATE_PROGRESS_V1_2.md` güncellemesi + git commit
+- [x] Yeni başlangıç kuralı (`START_MONEY = 100`, `BUILDINGS.bank.cost = 100`, başlangıçta yalnızca `1 Üniversite`, `MAX_UNIVERSITIES = 1`, asker bakım maliyeti yok)
+- [x] `5 sn`'de bir toplu gelir (`INCOME_TICK_SEC = 5`), Banka borç sistemi (`500 / 1.000 / 10.000`, `%15` faiz, `%25` otomatik kesinti, `20.000` tavan, `repayBankLoan`), `demolishBuilding` (`%50` iade)
+- [x] Bina-bazlı bağımsız paralel Fabrika üretim hatları (`BuildingSlot.parallelProduction`, `2 / 4 / 7 / 11 / 15 sn` kademeli süreler)
+- [x] Bina-bazlı bağımsız Kışla eğitimi (`BuildingSlot.trainingQueue`), ortak `min` kıt kaynak formülü (kalkan opsiyonel) ve askerlerin üretildiği Kışlanın yanında doğması
+- [x] AI başlangıç gecikmesi (`3` gün tam bekleme, `7.` güne kadar barışçıl gelişim) ve bina-bazlı ekipman → asker zincirine tam uyum
+- [x] Aşama 2 otomatik testler + temiz build + `UPDATE_PROGRESS_V1_2.md` güncellemesi + git commit
 
 ---
 

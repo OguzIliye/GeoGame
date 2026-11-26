@@ -35,6 +35,7 @@ export function createInitialGameState(): GameState {
     focusPing: null,
     tutorialSeen: false,
     tutorialPromptOpen: false,
+    floatingEffects: [],
     toasts: [],
     endReason: null,
   };
@@ -76,11 +77,14 @@ export function startGameWithCountry(
   state.focusPing = null;
   state.tutorialPromptOpen = false;
   state.endReason = null;
+  state.floatingEffects = [];
   state.toasts = [];
 
   for (const c of Object.values(state.countries)) {
     c.money = ECONOMY.START_MONEY;
     c.manpower = ECONOMY.START_MANPOWER;
+    c.debt = 0;
+    c.incomeTickAccSec = 0;
   }
 
   ensureAllDiplomacyPairs(state);

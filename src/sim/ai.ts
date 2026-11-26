@@ -1,4 +1,12 @@
-import { SHIELD_ORDER, WEAPON_ORDER } from '../config/balance';
+import {
+  AI_CONFIG,
+  BUILDINGS,
+  ECONOMY,
+  SHIELD_ORDER,
+  SHIELDS,
+  WEAPON_ORDER,
+  WEAPONS,
+} from '../config/balance';
 import type { BuildingType, Country, GameState, Region } from '../types';
 import {
   getMergeableFriendlyArmies,
@@ -19,10 +27,12 @@ import {
 import {
   getCountryRegions,
   getEffectiveBuildingCount,
-  queueBarracksTraining,
-  queueFactoryProduction,
+  getTotalBuildingCountIncludingConstructing,
+  queueBarracksTrainingBatch,
+  queueFactoryParallelBatch,
   startBuildingConstruction,
   startTechResearch,
+  type FactoryBatchItemInput,
 } from './economy';
 
 function getBestUnlockedWeapon(c: Country) {
@@ -72,13 +82,22 @@ function getWarEnemyIds(state: GameState, countryId: string): string[] {
   );
 }
 
-/** Tick all active AI countries with human-like 2-4s decision intervals, 4 personalities, and zero cheats. */
+/**
+ * Tick all active AI countries:
+ * - Days 0..3 (`AI_CONFIG.STARTUP_DELAY_DAYS`): complete wait window — AI takes ZERO actions.
+ * - Days 3..7 (`AI_CONFIG.PEACEFUL_DEV_UNTIL_DAYS`): peaceful internal economy, buildings, tech, equipment & training;
+ *   no war declarations or offensive aggression (defensive right preserved if attacked by player).
+ * - Uses the exact same building-based Factory -> Barracks `min` pipeline as the player.
+ */
 export function tickAICountries(
   state: GameState,
   dtSimSec: number,
   rng: () => number = Math.random,
 ): void {
   if (dtSimSec <= 0 || state.phase !== 'playing') return;
+  if (state.simDaysElapsed < AI_CONFIG.STARTUP_DELAY_DAYS) return;
+
+  const peacefulDevWindow = state.simDaysElapsed < AI_CONFIG.PEACEFUL_DEV_UNTIL_DAYS;
 
   for (const ai of Object.values(state.countries)) {
     if (ai.isPlayer || ai.eliminated) continue;
@@ -92,8 +111,10 @@ export function tickAICountries(
     if (owned.length === 0) continue;
 
     runAIEconomyAndProduction(state, ai, owned, rng);
-    runAIDiplomacy(state, ai, rng);
-    runAIMilitaryTactics(state, ai, owned);
+    runAIDiplomacy(state, ai, rng, peacefulDevWindow);
+    if (!peacefulDevWindow || getWarEnemyIds(state, ai.id).length > 0) {
+      runAIMilitaryTactics(state, ai, owned);
+    }
   }
 }
 
@@ -103,29 +124,30 @@ function runAIEconomyAndProduction(
   owned: Region[],
   rng: () => number,
 ): void {
-  // 1. Buildings
+  // 1. Buildings (starting from 100 money + 1 University: Bank -> Factory -> Barracks -> ...)
   const emptyRegs = owned.filter((r) => !r.building);
   const constructingAny = owned.some((r) => r.building?.constructing);
-  if (emptyRegs.length > 0 && !constructingAny && ai.money >= 165) {
-    const banks = getEffectiveBuildingCount(state, ai.id, 'bank');
-    const factories = getEffectiveBuildingCount(state, ai.id, 'factory');
-    const barracks = getEffectiveBuildingCount(state, ai.id, 'barracks');
-    const hospitals = getEffectiveBuildingCount(state, ai.id, 'hospital');
-    const unis = getEffectiveBuildingCount(state, ai.id, 'university');
-    const ports = getEffectiveBuildingCount(state, ai.id, 'port');
+  if (emptyRegs.length > 0 && !constructingAny) {
+    const banks = getTotalBuildingCountIncludingConstructing(state, ai.id, 'bank');
+    const factories = getTotalBuildingCountIncludingConstructing(state, ai.id, 'factory');
+    const barracks = getTotalBuildingCountIncludingConstructing(state, ai.id, 'barracks');
+    const hospitals = getTotalBuildingCountIncludingConstructing(state, ai.id, 'hospital');
+    const unis = getTotalBuildingCountIncludingConstructing(state, ai.id, 'university');
+    const ports = getTotalBuildingCountIncludingConstructing(state, ai.id, 'port');
 
     let desired: BuildingType | null = null;
     if (banks < 1) desired = 'bank';
     else if (factories < 1) desired = 'factory';
     else if (barracks < 1) desired = 'barracks';
     else if (ai.personality === 'economist' && banks < 2) desired = 'bank';
-    else if (unis < 1 && (ai.personality === 'economist' || ai.money >= 240)) desired = 'university';
+    else if (unis < ECONOMY.MAX_UNIVERSITIES) desired = 'university';
     else if (hospitals < 1) desired = 'hospital';
     else if (ports < 1 && emptyRegs.some((r) => r.isCoastal)) desired = 'port';
     else if (banks < 3) desired = 'bank';
     else if (factories < 2) desired = 'factory';
+    else if (barracks < 2) desired = 'barracks';
 
-    if (desired) {
+    if (desired && ai.money >= BUILDINGS[desired].cost) {
       const targetReg =
         desired === 'port'
           ? emptyRegs.find((r) => r.isCoastal)
@@ -136,9 +158,19 @@ function runAIEconomyAndProduction(
     }
   }
 
-  // 2. Science Research
+  // 2. Science Research (only after core economy buildings exist so early cash goes to Bank/Factory/Barracks)
+  const activeBanks = getEffectiveBuildingCount(state, ai.id, 'bank');
+  const activeFactories = getEffectiveBuildingCount(state, ai.id, 'factory');
+  const activeBarracks = getEffectiveBuildingCount(state, ai.id, 'barracks');
   const unis = getEffectiveBuildingCount(state, ai.id, 'university');
-  if (unis > 0 && !ai.activeResearch && ai.money >= 240) {
+  if (
+    unis > 0 &&
+    activeBanks >= 1 &&
+    activeFactories >= 1 &&
+    activeBarracks >= 1 &&
+    !ai.activeResearch &&
+    ai.money >= 240
+  ) {
     const preferWeapon =
       ai.personality === 'aggressive'
         ? true
@@ -153,40 +185,77 @@ function runAIEconomyAndProduction(
     }
   }
 
-  // 3. Factory Equipment Orders
-  const factories = getEffectiveBuildingCount(state, ai.id, 'factory');
+  // 3. Building-Based Parallel Factory Equipment Orders (2s..15s per unit)
+  const factoryRegs = owned.filter(
+    (r) => r.building?.type === 'factory' && !r.building.constructing,
+  );
   const bestW = getBestUnlockedWeapon(ai);
   const bestS = getBestUnlockedShield(ai);
-  if (factories > 0 && ai.productionQueue.length < 2 && ai.money >= 90) {
-    if (ai.weaponsStock[bestW] < 12) {
-      queueFactoryProduction(state, ai.id, 'weapon', bestW, 6);
+  for (const facReg of factoryRegs) {
+    const lines = facReg.building?.parallelProduction ?? [];
+    const pendingW =
+      lines.find((l) => l.category === 'weapon' && l.itemId === bestW)?.remainingCount ?? 0;
+    const pendingS =
+      lines.find((l) => l.category === 'shield' && l.itemId === bestS)?.remainingCount ?? 0;
+
+    const batch: FactoryBatchItemInput[] = [];
+    let projectedCost = 0;
+
+    if (ai.weaponsStock[bestW] + pendingW < 12) {
+      const wCost = WEAPONS[bestW].prodCost;
+      const canBuy = Math.min(6, Math.floor((ai.money - projectedCost) / wCost));
+      if (canBuy >= 2) {
+        batch.push({ category: 'weapon', itemId: bestW, count: canBuy });
+        projectedCost += canBuy * wCost;
+      }
     }
-    if (ai.shieldsStock[bestS] < 10 && ai.money >= 60) {
-      queueFactoryProduction(state, ai.id, 'shield', bestS, 5);
+
+    if (ai.shieldsStock[bestS] + pendingS < 10) {
+      const sCost = SHIELDS[bestS].prodCost;
+      const canBuy = Math.min(5, Math.floor((ai.money - projectedCost) / sCost));
+      if (canBuy >= 2) {
+        batch.push({ category: 'shield', itemId: bestS, count: canBuy });
+        projectedCost += canBuy * sCost;
+      }
+    }
+
+    if (batch.length > 0) {
+      queueFactoryParallelBatch(state, ai.id, facReg.id, batch);
     }
   }
 
-  // 4. Barracks Soldier Training
-  const barracks = getEffectiveBuildingCount(state, ai.id, 'barracks');
-  if (barracks > 0 && ai.trainingQueue.length < 2 && Math.floor(ai.manpower) >= 4) {
-    // Train with best available weapon & shield in stock
-    const wChoice = [...WEAPON_ORDER].reverse().find((w) => ai.weaponsStock[w] >= 3);
-    if (wChoice) {
-      const sChoice = [...SHIELD_ORDER].reverse().find((s) => ai.shieldsStock[s] >= 3) ?? 'none';
-      const maxBatch = Math.min(
-        8,
-        Math.floor(ai.manpower),
-        ai.weaponsStock[wChoice],
-        sChoice === 'none' ? 999 : ai.shieldsStock[sChoice],
+  // 4. Building-Based Barracks Soldier Training (shared scarce-resource `min` formula!)
+  const barracksRegs = owned.filter(
+    (r) => r.building?.type === 'barracks' && !r.building.constructing,
+  );
+  for (const barReg of barracksRegs) {
+    const queuedSoldiers = (barReg.building?.trainingQueue ?? []).reduce(
+      (s, o) => s + o.remainingCount,
+      0,
+    );
+    if (queuedSoldiers >= 6 || Math.floor(ai.manpower) < 2) continue;
+
+    const totalWeaponsInStock = WEAPON_ORDER.reduce((s, w) => s + ai.weaponsStock[w], 0);
+    if (totalWeaponsInStock >= 2) {
+      const desiredBatch = Math.min(8, Math.floor(ai.manpower), totalWeaponsInStock);
+      queueBarracksTrainingBatch(
+        state,
+        ai.id,
+        barReg.id,
+        desiredBatch,
+        ai.weaponsStock,
+        ai.shieldsStock,
       );
-      if (maxBatch >= 2) {
-        queueBarracksTraining(state, ai.id, wChoice, sChoice, maxBatch);
-      }
     }
   }
 }
 
-function runAIDiplomacy(state: GameState, ai: Country, rng: () => number): void {
+function runAIDiplomacy(
+  state: GameState,
+  ai: Country,
+  rng: () => number,
+  peacefulDevWindow: boolean,
+): void {
   const myPower = estimateCountryMilitaryPower(state, ai.id);
   const warEnemies = getWarEnemyIds(state, ai.id);
 
@@ -223,16 +292,32 @@ function runAIDiplomacy(state: GameState, ai: Country, rng: () => number): void 
       continue;
     }
 
-    // Never declare war without a meaningful army
-    if (myPower < 65 || rel !== 'neutral') continue;
+    // Peaceful development window (until day 7): never declare offensive war!
+    if (peacefulDevWindow) continue;
+
+    // Never declare war without an actual standing army
+    const mySoldiers = Object.values(state.armies)
+      .filter((a) => a.countryId === ai.id)
+      .reduce((s, a) => s + getTotalSoldiers(a.units), 0);
+    if (mySoldiers < 4 || myPower < 65 || rel !== 'neutral') continue;
 
     const otherBusyInWar = isCountryInAnyWar(state, otherId);
     let shouldAttack = false;
     if (ai.personality === 'aggressive' && myPower >= otherPower * 0.95 && rng() < 0.28) {
       shouldAttack = true;
-    } else if (ai.personality === 'opportunist' && otherBusyInWar && myPower >= otherPower * 0.75 && rng() < 0.4) {
+    } else if (
+      ai.personality === 'opportunist' &&
+      otherBusyInWar &&
+      myPower >= otherPower * 0.75 &&
+      rng() < 0.4
+    ) {
       shouldAttack = true;
-    } else if (ai.personality === 'economist' && ai.unlockedWeapons.length >= 2 && myPower >= otherPower * 1.25 && rng() < 0.22) {
+    } else if (
+      ai.personality === 'economist' &&
+      ai.unlockedWeapons.length >= 2 &&
+      myPower >= otherPower * 1.25 &&
+      rng() < 0.22
+    ) {
       shouldAttack = true;
     } else if (ai.personality === 'diplomat' && myPower >= otherPower * 1.65 && rng() < 0.12) {
       shouldAttack = true;

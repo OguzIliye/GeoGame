@@ -35,6 +35,8 @@ import {
   proposePeace,
 } from '../sim/diplomacy';
 import {
+  getCountryActiveProductionOrders,
+  getCountryActiveTrainingOrders,
   getCountryHealthPct,
   getCountryManpowerPerSec,
   getCountryMoneyPerSec,
@@ -1080,14 +1082,14 @@ export class GameUIController {
           'Aktif araştırma yok — Ağaçtaki sarı çerçeveli sıradaki ikona tıklayarak araştırma başlatın (İkonların üstüne gelince statlar görünür).';
       }
     } else if (this.activeWindow === 'factory') {
-      const q = p.productionQueue[0];
+      const q = getCountryActiveProductionOrders(this.state, pid)[0]?.order;
       const wSummary = WEAPON_ORDER.map((w) => `${WEAPONS[w].name}:${p.weaponsStock[w]}`).join(' ');
       const sSummary = SHIELD_ORDER.map((s) => `${SHIELDS[s].name}:${p.shieldsStock[s]}`).join(' ');
       liveBox.textContent = q
         ? `Üretiliyor: ${q.itemId} (Kalan: ${q.remainingCount}) | Silah: [${wSummary}] | Kalkan: [${sSummary}]`
         : `Fabrika boşta | Silah: [${wSummary}] | Kalkan: [${sSummary}]`;
     } else if (this.activeWindow === 'barracks') {
-      const q = p.trainingQueue[0];
+      const q = getCountryActiveTrainingOrders(this.state, pid)[0]?.order;
       liveBox.textContent = q
         ? `Eğitiliyor: ${WEAPONS[q.weapon].name} + ${q.shield === 'none' ? 'Kalkansız' : SHIELDS[q.shield].name} (Kalan: ${q.remainingCount})`
         : 'Kışla boşta.';
