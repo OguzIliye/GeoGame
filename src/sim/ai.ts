@@ -14,13 +14,16 @@ import {
   mergeArmies,
   orderArmyAttackEnemyArmy,
   orderArmyEmbarkShip,
+  orderArmyMergeIntoTarget,
   orderArmyMoveToRegion,
   orderShipSailToCoastalRegion,
+  splitArmyHalf,
 } from './army';
 import {
   declareWar,
   estimateCountryMilitaryPower,
   getRelationStatus,
+  isNonAggressionActive,
   proposeAlliance,
   proposePeace,
 } from './diplomacy';
@@ -112,9 +115,7 @@ export function tickAICountries(
 
     runAIEconomyAndProduction(state, ai, owned, rng);
     runAIDiplomacy(state, ai, rng, peacefulDevWindow);
-    if (!peacefulDevWindow || getWarEnemyIds(state, ai.id).length > 0) {
-      runAIMilitaryTactics(state, ai, owned);
-    }
+    runAIMilitaryTactics(state, ai, owned, peacefulDevWindow);
   }
 }
 
@@ -225,10 +226,22 @@ function runAIEconomyAndProduction(
   }
 
   // 4. Building-Based Barracks Soldier Training (shared scarce-resource `min` formula!)
+  const inWar = getWarEnemyIds(state, ai.id).length > 0;
+  const currentArmyStacks = Object.values(state.armies).filter(
+    (a) => a.countryId === ai.id && getTotalSoldiers(a.units) > 0,
+  );
   const barracksRegs = owned.filter(
     (r) => r.building?.type === 'barracks' && !r.building.constructing,
   );
   for (const barReg of barracksRegs) {
+    // In peacetime, avoid spawning a 3rd separate stack at an empty barracks if 2 stacks already exist elsewhere
+    if (
+      !inWar &&
+      currentArmyStacks.length >= AI_CONFIG.MAX_PEACE_ARMIES &&
+      !currentArmyStacks.some((a) => a.currentRegionId === barReg.id && a.targetX === null)
+    ) {
+      continue;
+    }
     const queuedSoldiers = (barReg.building?.trainingQueue ?? []).reduce(
       (s, o) => s + o.remainingCount,
       0,
@@ -295,31 +308,43 @@ function runAIDiplomacy(
     // Peaceful development window (until day 7): never declare offensive war!
     if (peacefulDevWindow) continue;
 
-    // Never declare war without an actual standing army
+    // Never declare war without clear superiority (>= 1.6x) and sufficient army reserve
     const mySoldiers = Object.values(state.armies)
       .filter((a) => a.countryId === ai.id)
       .reduce((s, a) => s + getTotalSoldiers(a.units), 0);
-    if (mySoldiers < 4 || myPower < 65 || rel !== 'neutral') continue;
+    if (
+      mySoldiers < AI_CONFIG.MIN_WAR_SOLDIERS ||
+      myPower < 110 ||
+      rel !== 'neutral' ||
+      isNonAggressionActive(state, ai.id, otherId)
+    ) {
+      continue;
+    }
 
     const otherBusyInWar = isCountryInAnyWar(state, otherId);
+    const minRatio = AI_CONFIG.MIN_WAR_POWER_RATIO;
     let shouldAttack = false;
-    if (ai.personality === 'aggressive' && myPower >= otherPower * 0.95 && rng() < 0.28) {
+    if (ai.personality === 'aggressive' && myPower >= otherPower * minRatio && rng() < 0.08) {
       shouldAttack = true;
     } else if (
       ai.personality === 'opportunist' &&
       otherBusyInWar &&
-      myPower >= otherPower * 0.75 &&
-      rng() < 0.4
+      myPower >= otherPower * minRatio &&
+      rng() < 0.1
     ) {
       shouldAttack = true;
     } else if (
       ai.personality === 'economist' &&
       ai.unlockedWeapons.length >= 2 &&
-      myPower >= otherPower * 1.25 &&
-      rng() < 0.22
+      myPower >= otherPower * Math.max(1.85, minRatio) &&
+      rng() < 0.05
     ) {
       shouldAttack = true;
-    } else if (ai.personality === 'diplomat' && myPower >= otherPower * 1.65 && rng() < 0.12) {
+    } else if (
+      ai.personality === 'diplomat' &&
+      myPower >= otherPower * Math.max(2.2, minRatio) &&
+      rng() < 0.03
+    ) {
       shouldAttack = true;
     }
 
@@ -330,25 +355,75 @@ function runAIDiplomacy(
   }
 }
 
-function runAIMilitaryTactics(state: GameState, ai: Country, owned: Region[]): void {
-  const myArmies = Object.values(state.armies).filter((a) => a.countryId === ai.id);
+export function consolidateAIPeaceArmies(state: GameState, aiId: string): void {
+  const stacks = Object.values(state.armies)
+    .filter((a) => a.countryId === aiId && !a.inCombatWithArmyId && getTotalSoldiers(a.units) > 0)
+    .sort((a, b) => getTotalSoldiers(b.units) - getTotalSoldiers(a.units));
 
-  // Consolidate nearby idle friendly stacks
-  for (const a of myArmies) {
-    if (!state.armies[a.id] || a.inCombatWithArmyId) continue;
-    const near = getMergeableFriendlyArmies(state, a.id);
-    if (near.length > 0) {
-      mergeArmies(state, a.id, near[0].id);
+  if (stacks.length <= AI_CONFIG.MAX_PEACE_ARMIES) return;
+
+  const anchors = stacks.slice(0, AI_CONFIG.MAX_PEACE_ARMIES);
+  const extras = stacks.slice(AI_CONFIG.MAX_PEACE_ARMIES);
+
+  for (const extra of extras) {
+    if (!state.armies[extra.id]) continue;
+    let nearest = anchors[0];
+    let bestD = Infinity;
+    for (const anc of anchors) {
+      if (!state.armies[anc.id]) continue;
+      const d = Math.hypot(anc.x - extra.x, anc.y - extra.y);
+      if (d < bestD) {
+        bestD = d;
+        nearest = anc;
+      }
+    }
+    if (nearest && state.armies[nearest.id] && nearest.id !== extra.id) {
+      orderArmyMergeIntoTarget(state, extra.id, nearest.id);
     }
   }
+}
 
+function runAIMilitaryTactics(
+  state: GameState,
+  ai: Country,
+  owned: Region[],
+  peacefulDevWindow = false,
+): void {
   const warEnemies = getWarEnemyIds(state, ai.id);
-  if (warEnemies.length === 0) return;
+
+  // Peacetime rule: keep at most MAX_PEACE_ARMIES (2) stacks; merge any excess stacks back together!
+  if (warEnemies.length === 0) {
+    consolidateAIPeaceArmies(state, ai.id);
+    return;
+  }
+  if (peacefulDevWindow && warEnemies.length === 0) return;
 
   // Gather enemy regions & enemy armies
   const enemyRegions = Object.values(state.regions).filter((r) => warEnemies.includes(r.ownerId));
   const enemyArmies = Object.values(state.armies).filter((a) => warEnemies.includes(a.countryId));
   if (enemyRegions.length === 0) return;
+
+  // Wartime flexibility: allow splitting a large idle stack (>= 12 soldiers) to cover multiple enemy fronts
+  const myActiveStacks = Object.values(state.armies).filter(
+    (a) => a.countryId === ai.id && getTotalSoldiers(a.units) > 0,
+  );
+  if (enemyRegions.length >= 2 && myActiveStacks.length < Math.min(4, enemyRegions.length)) {
+    const splittable = myActiveStacks.find(
+      (a) => !a.inCombatWithArmyId && a.targetX === null && getTotalSoldiers(a.units) >= 12,
+    );
+    if (splittable) {
+      splitArmyHalf(state, splittable.id);
+    }
+  } else {
+    // Still merge tiny adjacent fragments in wartime so stacks stay effective
+    for (const a of myActiveStacks) {
+      if (!state.armies[a.id] || a.inCombatWithArmyId || getTotalSoldiers(a.units) >= 6) continue;
+      const near = getMergeableFriendlyArmies(state, a.id);
+      if (near.length > 0) {
+        mergeArmies(state, near[0].id, a.id);
+      }
+    }
+  }
 
   // Sail any loaded transport ships to an enemy coastal region
   for (const ship of Object.values(state.ships)) {

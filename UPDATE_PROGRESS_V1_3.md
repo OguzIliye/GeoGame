@@ -3,8 +3,8 @@
 > [UPDATE_DESIGN_V1_3.md](UPDATE_DESIGN_V1_3.md) kapsamındaki 5 aşamanın ilerleme durumu.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 2 — Toprak Geçiş Kuralları & Anlaşmalı Ülkelerle Etkileşimsizlik
-- **Tamamlanan Aşamalar:** 2 / 5
+- **Aktif Aşama:** Aşama 3 — Daha Az Agresif AI & Barışta Maks. 2 Birlik Kuralı
+- **Tamamlanan Aşamalar:** 3 / 5
 - **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -21,9 +21,9 @@
 - [x] Aşama 2 testler + temiz build + git commit
 
 ## Aşama 3 — Daha Az Agresif AI & Barışta Maks. 2 Birlik Kuralı
-- [ ] Yüksek saldırı eşiği (`≥ 1.6×`) ve düşük savaş ilan sıklığı
-- [ ] Barışta en fazla 2 ordu birliği sınırı; sadece savaşta birlik artışı ve barış sonrası tekrar `≤ 2` birleştirme
-- [ ] Aşama 3 testler + temiz build + git commit
+- [x] Yüksek saldırı eşiği (`≥ 1.6×`) ve düşük savaş ilan sıklığı
+- [x] Barışta en fazla 2 ordu birliği sınırı; sadece savaşta birlik artışı ve barış sonrası tekrar `≤ 2` birleştirme
+- [x] Aşama 3 testler + temiz build + git commit
 
 ## Aşama 4 — Tutorial Gizle/Aç, Sağ Üst Buton & Alt-Hedefli Çakışmasız Spotlight
 - [ ] Spotlight kartı ve bekleme rozetine `— Gizle` butonu + sağ üst `📖 Tutorial Görevi (Adım X/11)` geri açma butonu

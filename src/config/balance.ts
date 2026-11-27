@@ -53,6 +53,9 @@ export const LOAN_CONFIG = {
 export const AI_CONFIG = {
   STARTUP_DELAY_DAYS: 3,
   PEACEFUL_DEV_UNTIL_DAYS: 7,
+  MIN_WAR_POWER_RATIO: 1.6,
+  MIN_WAR_SOLDIERS: 12,
+  MAX_PEACE_ARMIES: 2,
 } as const;
 
 export interface BuildingSpec {
