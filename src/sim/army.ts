@@ -23,6 +23,7 @@ import { setAutoPauseReason } from './calendar';
 import {
   canArmyEnterCountryTerritory,
   declareWar,
+  evacuateStrandedArmies,
   getRelationStatus,
   hasTransitPact,
 } from './diplomacy';
@@ -436,6 +437,43 @@ export function splitArmyHalf(
   return splitArmyStack(state, armyId, splitCounts);
 }
 
+/** Split an exact total soldier count (`amount`) proportionally across unit types in the stack. */
+export function splitArmyByCount(
+  state: GameState,
+  armyId: string,
+  amount: number,
+): { ok: boolean; newArmy?: ArmyStack; error?: string } {
+  const army = state.armies[armyId];
+  if (!army) return { ok: false, error: 'Ordu kümesi bulunamadı.' };
+  if (army.inCombatWithArmyId) return { ok: false, error: 'Savaştaki küme ayrılamaz.' };
+
+  const entries = getNonZeroUnits(army.units);
+  const total = getTotalSoldiers(army.units);
+  if (total <= 1) return { ok: false, error: 'Ayırmak için en az 2 asker olmalı.' };
+  const target = Math.floor(amount);
+  if (!Number.isFinite(amount) || target < 1 || target >= total) {
+    return { ok: false, error: `1 ile ${total - 1} arasında bir asker sayısı girin.` };
+  }
+
+  const splitCounts: Record<string, number> = {};
+  let assigned = 0;
+  for (const [key, cnt] of entries) {
+    const share = Math.min(cnt, Math.floor((cnt * target) / total));
+    splitCounts[key] = share;
+    assigned += share;
+  }
+  for (const [key, cnt] of entries) {
+    if (assigned >= target) break;
+    const room = cnt - splitCounts[key];
+    if (room > 0) {
+      const add = Math.min(room, target - assigned);
+      splitCounts[key] += add;
+      assigned += add;
+    }
+  }
+  return splitArmyStack(state, armyId, splitCounts);
+}
+
 function hashSeedSign(seed: string): number {
   let h = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -575,9 +613,16 @@ export function orderArmyMoveToRegion(
   }
 
   const dest: Point = destPoint ? [destPoint[0], destPoint[1]] : [reg.centroid[0], reg.centroid[1]];
+  const curReg = state.regions[army.currentRegionId];
+  const startingOnForbidden =
+    Boolean(army.evacuatingHome) ||
+    (curReg !== undefined && !canArmyEnterCountryTerritory(state, army.countryId, curReg.ownerId));
   let wps: Point[];
 
-  if (segmentCrossesForbiddenTerritory(state, army.countryId, [army.x, army.y], dest)) {
+  if (startingOnForbidden && reg.ownerId === army.countryId) {
+    wps = [dest];
+    army.evacuatingHome = true;
+  } else if (segmentCrossesForbiddenTerritory(state, army.countryId, [army.x, army.y], dest)) {
     const startReg =
       state.regions[army.currentRegionId] ?? pickRegionAtPoint([army.x, army.y], state.regions);
     const regionPath = startReg
@@ -591,6 +636,7 @@ export function orderArmyMoveToRegion(
     }
     wps = regionPath.slice(1, -1).map((r): Point => [r.centroid[0], r.centroid[1]]);
     wps.push(dest);
+    army.evacuatingHome = false;
   } else {
     wps = buildNaturalMarchWaypoints(
       state,
@@ -599,6 +645,7 @@ export function orderArmyMoveToRegion(
       dest,
       `${army.id}_${targetRegionId}`,
     );
+    army.evacuatingHome = false;
   }
 
   clearCaptureByArmy(state, army.id);
@@ -657,7 +704,11 @@ export function orderArmyAttackEnemyArmy(
   if (!army || !enemy) return { ok: false, error: 'Geçersiz hedef ordu.' };
   if (army.inCombatWithArmyId) return { ok: false, error: 'Ordu zaten çatışmada.' };
   if (army.countryId === enemy.countryId) return { ok: false, error: 'Dost orduya saldırılamaz.' };
-  if (getRelationStatus(state, army.countryId, enemy.countryId) !== 'war') {
+  const rel = getRelationStatus(state, army.countryId, enemy.countryId);
+  if (rel === 'allied') {
+    return { ok: false, error: 'Müttefik ülke askerlerine saldırılamaz!' };
+  }
+  if (rel !== 'war') {
     return { ok: false, error: 'Bu ülkeyle savaşta değilsiniz! Önce savaş ilan edin.' };
   }
 
@@ -887,11 +938,16 @@ export function checkPlayerArmyEncounters(state: GameState): void {
     (a) =>
       a.countryId === pid &&
       !a.inCombatWithArmyId &&
+      !a.evacuatingHome &&
       (a.retreatingUntilSimSec ?? 0) <= state.simSecondsElapsed &&
       getTotalSoldiers(a.units) > 0,
   );
   const foreignArmies = allArmies.filter(
-    (a) => a.countryId !== pid && !a.inCombatWithArmyId && getTotalSoldiers(a.units) > 0,
+    (a) =>
+      a.countryId !== pid &&
+      !a.inCombatWithArmyId &&
+      !a.evacuatingHome &&
+      getTotalSoldiers(a.units) > 0,
   );
 
   for (const myArmy of myArmies) {
@@ -960,6 +1016,9 @@ export function resolveEncounterChoice(
   }
 
   if (choice === 'declare_war_attack') {
+    if (getRelationStatus(state, myArmy.countryId, other.countryId) === 'allied') {
+      return { ok: false, error: 'Müttefik ülke askerleriyle savaşa girilemez!' };
+    }
     if (getRelationStatus(state, myArmy.countryId, other.countryId) !== 'war') {
       const warRes = declareWar(state, myArmy.countryId, other.countryId);
       if (!warRes.ok) return warRes;
@@ -1322,6 +1381,7 @@ function handleRegionCaptured(state: GameState, reg: Region, newOwnerId: string)
       'loss',
     );
   }
+  evacuateStrandedArmies(state);
 
   // Check country elimination
   const prevRemaining = getCountryRegions(state, prevOwnerId);
@@ -1470,6 +1530,7 @@ export function tickArmiesCombatAndShips(
         army.targetX = null;
         army.targetY = null;
         army.waypoints = [];
+        army.evacuatingHome = false;
       } else if (
         Math.hypot(army.x - mergeTarget.x, army.y - mergeTarget.y) <= COMBAT_CONFIG.MERGE_DISTANCE
       ) {
@@ -1489,6 +1550,7 @@ export function tickArmiesCombatAndShips(
         army.targetX = null;
         army.targetY = null;
         army.waypoints = [];
+        army.evacuatingHome = false;
       } else {
         army.targetX = foe.x;
         army.targetY = foe.y;
@@ -1503,6 +1565,7 @@ export function tickArmiesCombatAndShips(
         army.targetX = null;
         army.targetY = null;
         army.waypoints = [];
+        army.evacuatingHome = false;
       } else {
         army.targetX = ship.x;
         army.targetY = ship.y;
@@ -1539,6 +1602,7 @@ export function tickArmiesCombatAndShips(
         army.targetX = null;
         army.targetY = null;
         army.waypoints = [];
+        army.evacuatingHome = false;
 
         if (army.mergeTargetArmyId) {
           const mergeTarget = state.armies[army.mergeTargetArmyId];
@@ -1582,6 +1646,7 @@ export function tickArmiesCombatAndShips(
         if (
           under &&
           under.id !== army.currentRegionId &&
+          !army.evacuatingHome &&
           !canArmyEnterCountryTerritory(state, army.countryId, under.ownerId)
         ) {
           army.targetX = null;
@@ -1592,7 +1657,12 @@ export function tickArmiesCombatAndShips(
         }
         army.x = nextX;
         army.y = nextY;
-        if (under) army.currentRegionId = under.id;
+        if (under) {
+          army.currentRegionId = under.id;
+          if (army.evacuatingHome && under.ownerId === army.countryId) {
+            army.evacuatingHome = false;
+          }
+        }
 
         // Check mid-step auto-merge when walking to mergeTargetArmyId
         if (army.mergeTargetArmyId) {
@@ -1704,7 +1774,10 @@ export function tickArmiesCombatAndShips(
           getRelationStatus(state, member.countryId, seed.countryId) === 'allied'
         ) {
           sideA.push(member);
-        } else if (getRelationStatus(state, member.countryId, seed.countryId) === 'war') {
+        } else if (
+          getRelationStatus(state, member.countryId, seed.countryId) === 'war' &&
+          !sideA.some((a) => getRelationStatus(state, a.countryId, member.countryId) === 'allied')
+        ) {
           sideB.push(member);
         }
       }

@@ -299,7 +299,7 @@ body,
   z-index: 18;
 }
 
-/* Bottom-Right Multi-Army Merge Panel */
+/* Bottom-Right Army Action Panel */
 .multi-army-panel {
   position: absolute;
   bottom: 12px;
@@ -308,7 +308,8 @@ body,
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 280px;
+  min-width: 300px;
+  max-width: 380px;
   border-color: #facc15;
 }
 

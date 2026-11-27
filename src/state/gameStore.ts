@@ -33,6 +33,7 @@ export function createInitialGameState(): GameState {
     placementHoverPoint: null,
     autoPauseReasons: [],
     activeEncounter: null,
+    warAlertQueue: [],
     encounterCooldownUntilSimSec: {},
     armyFocusIndex: -1,
     focusPing: null,

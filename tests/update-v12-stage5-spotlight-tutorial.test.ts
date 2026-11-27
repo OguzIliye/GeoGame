@@ -272,9 +272,14 @@ describe('v1.2 Aşama 5 — 11 Adımlı 20 px SVG Spotlight Tutorial, Banka Bor�
       tutorial.syncFrame();
       expect(tutorial.stage).toBe('6_click_army');
 
-      // Adım 6: 50/50 Böl & Tekrar Birleştir
+      // Adım 6: Orduya tıklayınca popup açılmaz, sağ-alt ordu panelinden 2'ye Böl & Birleştir çalışır!
       selectSingleArmy(state, myArmy.id);
-      ui.openWindow('army', false);
+      ui.syncFrame();
+      expect(ui.activeWindow).toBeNull();
+      const armyPanel = registry.get('multi-army-panel')!;
+      expect(armyPanel.innerHTML).toContain('btn-split-half');
+      expect(armyPanel.innerHTML).toContain('inp-split-count');
+      expect(armyPanel.innerHTML).toContain('btn-split-count');
       tutorial.syncFrame();
       expect(tutorial.stage).toBe('6_split_half');
       const sp = splitArmyHalf(state, myArmy.id);

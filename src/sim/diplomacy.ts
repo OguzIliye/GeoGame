@@ -1,5 +1,6 @@
 import { DIPLOMACY_CONFIG } from '../config/balance';
 import type { DiplomacyEdge, GameState, RelationStatus } from '../types';
+import { setAutoPauseReason, setGameSpeed } from './calendar';
 import { getCountryRegions, pushImportantToast } from './economy';
 
 export function makePairKey(a: string, b: string): string {
@@ -62,9 +63,7 @@ export function getNonAggressionRemainingDays(state: GameState, a: string, b: st
 
 export function hasTransitPact(state: GameState, a: string, b: string): boolean {
   if (a === b) return false;
-  const edge = getDiplomacyEdge(state, a, b);
-  if (!edge || edge.status === 'war') return false;
-  return edge.status === 'allied' || Boolean(edge.peaceTreaty) || isNonAggressionActive(state, a, b);
+  return getRelationStatus(state, a, b) === 'allied';
 }
 
 export function canArmyEnterCountryTerritory(
@@ -74,7 +73,65 @@ export function canArmyEnterCountryTerritory(
 ): boolean {
   if (armyCountryId === territoryOwnerId) return true;
   const rel = getRelationStatus(state, armyCountryId, territoryOwnerId);
-  return rel === 'war' || hasTransitPact(state, armyCountryId, territoryOwnerId);
+  return rel === 'war' || rel === 'allied';
+}
+
+/** Send any armies standing in (or marching toward) non-war, non-allied foreign territory back to their nearest own region. */
+export function evacuateStrandedArmies(state: GameState): void {
+  for (const army of Object.values(state.armies)) {
+    const curReg = state.regions[army.currentRegionId];
+    const targetReg = army.targetRegionId ? state.regions[army.targetRegionId] : null;
+    const onForbidden =
+      curReg !== undefined && !canArmyEnterCountryTerritory(state, army.countryId, curReg.ownerId);
+    const headingForbidden =
+      targetReg !== undefined &&
+      targetReg !== null &&
+      !canArmyEnterCountryTerritory(state, army.countryId, targetReg.ownerId);
+
+    if (!onForbidden && !headingForbidden) continue;
+
+    for (const reg of Object.values(state.regions)) {
+      if (reg.capture?.armyId === army.id) reg.capture = null;
+    }
+    army.inCombatWithArmyId = null;
+    army.targetArmyId = null;
+    army.mergeTargetArmyId = null;
+    army.embarkingShipId = null;
+
+    if (!onForbidden) {
+      army.targetRegionId = null;
+      army.targetX = null;
+      army.targetY = null;
+      army.waypoints = [];
+      continue;
+    }
+
+    const owned = getCountryRegions(state, army.countryId);
+    if (owned.length === 0) continue;
+    owned.sort(
+      (a, b) =>
+        Math.hypot(a.centroid[0] - army.x, a.centroid[1] - army.y) -
+        Math.hypot(b.centroid[0] - army.x, b.centroid[1] - army.y),
+    );
+    const home = owned[0];
+    army.evacuatingHome = true;
+    army.targetRegionId = home.id;
+    army.waypoints = [[home.centroid[0], home.centroid[1]]];
+    army.targetX = home.centroid[0];
+    army.targetY = home.centroid[1];
+  }
+}
+
+function triggerPlayerWarAlertIfAI(state: GameState, attackerId: string, targetId: string): void {
+  const pid = state.playerCountryId;
+  if (!pid || attackerId === pid || targetId !== pid) return;
+  if (state.countries[attackerId]?.isPlayer) return;
+  state.warAlertQueue ??= [];
+  if (!state.warAlertQueue.includes(attackerId)) {
+    state.warAlertQueue.push(attackerId);
+  }
+  setGameSpeed(state, 0);
+  setAutoPauseReason(state, 'war_alert', true);
 }
 
 export function estimateCountryMilitaryPower(state: GameState, countryId: string): number {
@@ -118,6 +175,20 @@ export function declareWar(
   if (attackerId === pid || defenderId === pid) {
     pushImportantToast(state, `⚔️ Savaş İlanı: ${atkName} → ${defName}!`, 'war');
   }
+  triggerPlayerWarAlertIfAI(state, attackerId, defenderId);
+
+  // Stop home-evacuation for armies now inside a newly declared war enemy's territory so they fight/capture immediately
+  for (const army of Object.values(state.armies)) {
+    if (!army.evacuatingHome) continue;
+    const cur = state.regions[army.currentRegionId];
+    if (cur && canArmyEnterCountryTerritory(state, army.countryId, cur.ownerId)) {
+      army.evacuatingHome = false;
+      army.targetX = null;
+      army.targetY = null;
+      army.targetRegionId = null;
+      army.waypoints = [];
+    }
+  }
 
   // Defender's allies join defensive war
   for (const otherId of Object.keys(state.countries)) {
@@ -139,6 +210,7 @@ export function declareWar(
             'war',
           );
         }
+        triggerPlayerWarAlertIfAI(state, attackerId, otherId);
       }
     }
   }
@@ -209,6 +281,7 @@ export function breakAlliance(
   edge.status = 'neutral';
   edge.score = Math.max(-100, edge.score - DIPLOMACY_CONFIG.BREAK_ALLIANCE_PENALTY);
   edge.tradeAgreement = false;
+  evacuateStrandedArmies(state);
 
   const pid = state.playerCountryId;
   if (fromId === pid || toId === pid) {
@@ -278,6 +351,7 @@ export function proposePeace(
         'peace',
       );
     }
+    evacuateStrandedArmies(state);
   }
 
   return { ok: true, accepted };

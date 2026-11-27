@@ -23,17 +23,16 @@ import {
   computeArmyAverageStats,
   type EncounterChoice,
   formatUnitKeyLabel,
-  getMergeableFriendlyArmies,
   getMaxTierVisualsForUnits,
   getNonZeroUnits,
   getTotalSoldiers,
-  mergeArmies,
   orderArmiesMerge,
   parseUnitKey,
   resolveEncounterChoice,
   retreatFromCombat,
+  selectSingleArmy,
+  splitArmyByCount,
   splitArmyHalf,
-  splitArmyStack,
 } from '../sim/army';
 import {
   formatSimDate,
@@ -195,6 +194,7 @@ export class GameUIController {
   private callbacks: GameUICallbacks;
   private mountedPhase: string | null = null;
   private mountedEncounterKey: string | null = null;
+  private mountedWarAlertKey: string | null = null;
   private mountedPromptOpen = false;
   private mountedContinueOpen = false;
   private lastHudMoneyFxId = '';
@@ -370,6 +370,7 @@ export class GameUIController {
     let normalized: ActiveWindowId = win;
     if (normalized === 'buildings') normalized = 'shop';
     if (normalized === 'science') normalized = 'university';
+    if (normalized === 'army') normalized = null;
 
     const next = toggle && this.activeWindow === normalized ? null : normalized;
 
@@ -433,6 +434,7 @@ export class GameUIController {
   forceRefresh(): void {
     this.mountedPhase = null;
     this.mountedEncounterKey = null;
+    this.mountedWarAlertKey = null;
     this.quickBuildTarget = null;
     this.confirmDemolishRegionId = null;
     this.hideTooltip();
@@ -486,6 +488,7 @@ export class GameUIController {
     this.updateToasts();
     this.updateLiveProgressInsideModal();
     this.syncEncounterOverlay();
+    this.syncWarAlertOverlay();
   }
 
   mountWorldSelectBanner(customHint?: string): void {
@@ -901,6 +904,7 @@ export class GameUIController {
       <div id="quick-build-host"></div>
       <div id="modal-host" class="modal-host"></div>
       <div id="encounter-host"></div>
+      <div id="war-alert-host"></div>
       <div id="tutorial-host"></div>
       <div id="spotlight-host"></div>
     `;
@@ -1161,20 +1165,30 @@ export class GameUIController {
     }
   }
 
-  /** Bottom-Right Multi-Army Selection & Merge Panel (`2+` armies box-selected) */
+  /** Bottom-Right Army Action Panel (`1+` selected friendly armies: Merge, Split Half, Split Amount, Retreat) */
   private updateMultiArmyPanel(): void {
     const panel = document.getElementById('multi-army-panel');
     const pid = this.state.playerCountryId;
     if (!panel || !pid) return;
 
-    const validIds = (this.state.selectedArmyIds ?? []).filter(
-      (id) => this.state.armies[id]?.countryId === pid && getTotalSoldiers(this.state.armies[id].units) > 0,
+    const rawIds =
+      (this.state.selectedArmyIds?.length ?? 0) > 0
+        ? this.state.selectedArmyIds
+        : this.state.selectedArmyId
+          ? [this.state.selectedArmyId]
+          : [];
+    const validIds = [...new Set(rawIds)].filter(
+      (id) =>
+        this.state.armies[id]?.countryId === pid &&
+        getTotalSoldiers(this.state.armies[id].units) > 0,
     );
     if (validIds.length !== (this.state.selectedArmyIds?.length ?? 0)) {
       this.state.selectedArmyIds = validIds;
+      if (validIds.length === 1) this.state.selectedArmyId = validIds[0];
+      else if (validIds.length === 0) this.state.selectedArmyId = null;
     }
 
-    if (validIds.length < 2) {
+    if (validIds.length < 1) {
       if (panel.style.display !== 'none') {
         panel.style.display = 'none';
         panel.innerHTML = '';
@@ -1187,7 +1201,12 @@ export class GameUIController {
       (s, id) => s + getTotalSoldiers(this.state.armies[id].units),
       0,
     );
-    const sig = `${validIds.join(',')}:${totalSoldiers}`;
+    const singleArmy = validIds.length === 1 ? this.state.armies[validIds[0]] : null;
+    const inCombat = Boolean(singleArmy?.inCombatWithArmyId);
+    const canSplit = Boolean(singleArmy && !inCombat && totalSoldiers >= 2);
+    const canMerge = validIds.length >= 2;
+
+    const sig = `${validIds.join(',')}:${totalSoldiers}:${inCombat ? 1 : 0}`;
     panel.style.display = 'flex';
     if (panel.dataset.sig === sig) return;
     panel.dataset.sig = sig;
@@ -1195,21 +1214,29 @@ export class GameUIController {
     const pColor = this.state.countries[pid]?.color ?? '#3b82f6';
     const sampleVis = getMaxTierVisualsForUnits(this.state.armies[validIds[0]].units);
     const unitUri = getUnitSpriteDataUri(sampleVis.weapon, sampleVis.shield, pColor);
+    const defaultSplit = Math.max(1, Math.floor(totalSoldiers / 2));
 
     panel.innerHTML = `
       <div style="display:flex;align-items:center;gap:10px">
         <img src="${unitUri}" style="width:36px;height:32px;image-rendering:pixelated" alt="" />
         <div>
           <strong>${validIds.length} Birlik Seçili</strong>
-          <div class="muted">Toplam: <b>${totalSoldiers} Asker</b></div>
+          <div class="muted">Toplam: <b>${totalSoldiers} Asker</b>${inCombat ? ' • 🔥 Çatışmada' : ''}</div>
         </div>
       </div>
       <hr class="popup-divider" style="margin:4px 0" />
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="pixel-btn active-btn" id="btn-multi-merge">🔗 Seçilenleri Birleştir</button>
-        <button class="pixel-btn" id="btn-multi-cancel">✕ Seçimi İptal</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <button class="pixel-btn ${canMerge ? 'active-btn' : ''}" id="btn-multi-merge" ${canMerge ? '' : 'disabled'}>🔗 Birleştir</button>
+        <button class="pixel-btn ${canSplit ? 'active-btn' : ''}" id="btn-split-half" ${canSplit ? '' : 'disabled'}>✂️ 2'ye Böl</button>
+        ${inCombat ? `<button class="pixel-btn danger-btn" id="btn-retreat-combat">🏃 Geri Çekil</button>` : ''}
+        <button class="pixel-btn" id="btn-multi-cancel">✕ İptal</button>
       </div>
-      <div class="muted" style="font-size:12.5px">Toplu yürütmek için haritada hedef bölgeye sol tıklayın.</div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <span class="muted" style="font-size:13px">Miktar Ayır:</span>
+        <input class="pixel-input" id="inp-split-count" type="number" min="1" max="${Math.max(1, totalSoldiers - 1)}" value="${defaultSplit}" style="width:68px;padding:4px 6px" ${canSplit ? '' : 'disabled'} />
+        <button class="pixel-btn" id="btn-split-count" ${canSplit ? '' : 'disabled'}>✂️ Ayır</button>
+      </div>
+      <div class="muted" style="font-size:12.5px">Yürütmek için haritada hedef bölgeye sol tıklayın.</div>
     `;
 
     panel.querySelector('#btn-multi-merge')?.addEventListener('click', () => {
@@ -1217,6 +1244,62 @@ export class GameUIController {
       if (!res.ok && res.error) {
         pushImportantToast(this.state, res.error, 'info');
       }
+      this.updateMultiArmyPanel();
+      this.updateLiveHUD();
+      this.callbacks.onModalInteraction?.();
+    });
+
+    panel.querySelector('#btn-split-half')?.addEventListener('click', () => {
+      if (!singleArmy) return;
+      const res = splitArmyHalf(this.state, singleArmy.id);
+      if (!res.ok) {
+        if (res.error) pushImportantToast(this.state, res.error, 'info');
+        return;
+      }
+      if (res.newArmy) {
+        selectSingleArmy(this.state, res.newArmy.id);
+        this.state.moveOrderMode = true;
+        setAutoPauseReason(this.state, 'move_order', true);
+      }
+      panel.dataset.sig = '';
+      this.updateMultiArmyPanel();
+      this.updateLiveHUD();
+      this.callbacks.onModalInteraction?.();
+    });
+
+    panel.querySelector('#btn-split-count')?.addEventListener('click', () => {
+      if (!singleArmy) return;
+      const inp = panel.querySelector<HTMLInputElement>('#inp-split-count');
+      const amt = Number(inp?.value || 0);
+      const res = splitArmyByCount(this.state, singleArmy.id, amt);
+      if (!res.ok) {
+        if (res.error) pushImportantToast(this.state, res.error, 'info');
+        return;
+      }
+      if (res.newArmy) {
+        selectSingleArmy(this.state, res.newArmy.id);
+        this.state.moveOrderMode = true;
+        setAutoPauseReason(this.state, 'move_order', true);
+      }
+      panel.dataset.sig = '';
+      this.updateMultiArmyPanel();
+      this.updateLiveHUD();
+      this.callbacks.onModalInteraction?.();
+    });
+
+    panel.querySelector('#btn-retreat-combat')?.addEventListener('click', () => {
+      if (!singleArmy) return;
+      const res = retreatFromCombat(this.state, singleArmy.id);
+      if (!res.ok) {
+        if (res.error) pushImportantToast(this.state, res.error, 'info');
+        return;
+      }
+      pushImportantToast(
+        this.state,
+        `🏃 Ordu geri çekiliyor (-${res.lostSoldiers ?? 0} kayıp).`,
+        'info',
+      );
+      panel.dataset.sig = '';
       this.updateMultiArmyPanel();
       this.updateLiveHUD();
     });
@@ -1309,6 +1392,61 @@ export class GameUIController {
       .map((t) => `<div class="toast-item toast-${t.kind}">${t.message}</div>`)
       .join('');
     if (strip.innerHTML !== html) strip.innerHTML = html;
+  }
+
+  private syncWarAlertOverlay(): void {
+    const host = document.getElementById('war-alert-host');
+    if (!host) return;
+    const attackerId = this.state.warAlertQueue?.[0] ?? null;
+    if (!attackerId || !this.state.countries[attackerId]) {
+      if (this.mountedWarAlertKey !== null || host.innerHTML !== '') {
+        this.mountedWarAlertKey = null;
+        host.innerHTML = '';
+      }
+      if ((this.state.warAlertQueue?.length ?? 0) === 0) {
+        setAutoPauseReason(this.state, 'war_alert', false);
+      }
+      return;
+    }
+
+    if (this.mountedWarAlertKey === attackerId) return;
+    this.mountedWarAlertKey = attackerId;
+
+    const attacker = this.state.countries[attackerId];
+    const flagUri = getCountryFlagDataUri(attacker.color);
+
+    host.innerHTML = `
+      <div class="encounter-overlay" id="war-alert-overlay">
+        <div class="pixel-panel modal-window" style="max-width:560px;border-color:#ef4444;text-align:center">
+          <div class="modal-header" style="justify-content:center">
+            <div class="popup-title-wrap">
+              <img class="popup-header-icon" src="${flagUri}" alt="" />
+              <strong style="color:#fca5a5">⚔️ Savaş İlanı!</strong>
+            </div>
+          </div>
+          <div class="err-line" style="font-size:16px;margin-bottom:10px">
+            🚨 <b>${escapeAttr(attacker.name)}</b> ülkenize savaş ilan etti!
+          </div>
+          <div class="muted" style="margin-bottom:12px">
+            ⏸ Oyun savunma hazırlığınız için otomatik duraklatıldı. Hazır olduğunuzda hız çubuğundan (<code>1x</code> / <code>Space</code>) devam edebilirsiniz.
+          </div>
+          <hr class="popup-divider" />
+          <div style="display:flex;justify-content:center;margin-top:12px">
+            <button class="pixel-btn active-btn" id="btn-war-alert-ok">Tamam</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    host.querySelector('#btn-war-alert-ok')?.addEventListener('click', () => {
+      this.state.warAlertQueue?.shift();
+      if ((this.state.warAlertQueue?.length ?? 0) === 0) {
+        setAutoPauseReason(this.state, 'war_alert', false);
+      }
+      this.mountedWarAlertKey = null;
+      this.syncWarAlertOverlay();
+      this.updateLiveHUD();
+    });
   }
 
   private syncEncounterOverlay(): void {
@@ -2477,131 +2615,6 @@ export class GameUIController {
       }
     }
 
-    // 3. ARMY POPUP (`army`) — 50/50 Split, Custom Split, Merge & Combat Retreat (`🏃 Geri Çekil`)!
-    if (this.activeWindow === 'army') {
-      const army = this.state.selectedArmyId ? this.state.armies[this.state.selectedArmyId] : null;
-      if (!army) {
-        this.activeWindow = null;
-        host.innerHTML = '';
-        return;
-      }
-      const owner = this.state.countries[army.countryId];
-      const entries = getNonZeroUnits(army.units);
-      const total = getTotalSoldiers(army.units);
-      const isMine = army.countryId === pid;
-      const inCombat = Boolean(army.inCombatWithArmyId);
-      const mergeable = isMine && !inCombat ? getMergeableFriendlyArmies(this.state, army.id) : [];
-      const maxVis = getMaxTierVisualsForUnits(army.units);
-      const headerUnitIcon = getUnitSpriteDataUri(maxVis.weapon, maxVis.shield, owner?.color ?? '#3b82f6');
-
-      host.innerHTML = `
-        <div class="pixel-panel modal-window">
-          <div class="modal-header">
-            <div class="popup-title-wrap">
-              <img class="popup-header-icon" src="${headerUnitIcon}" alt="" />
-              <strong>⚔️ Ordu Kümesi — ${owner?.name ?? ''} (Toplam: ${total} Asker)</strong>
-            </div>
-            <button class="pixel-btn close-win" ${closeBtnAttrs}>✕</button>
-          </div>
-          ${errHtml}
-          <div class="status-line">
-            ${
-              inCombat
-                ? '🔥 Bu ordu şu an aktif çatışmada! İsterseniz <b>%10 kayıp cezasıyla</b> en yakın dost bölgeye geri çekebilirsiniz.'
-                : isMine
-                  ? '🖱️ Haritada hedef bölgeye/düşmana sol tıklayarak yürütün, başka bir dost orduya sol tıklayarak birleştirin (Sağ tık = İptal).'
-                  : 'Yabancı devlet ordusu — birlik ikonlarının üstüne gelerek statları inceleyin.'
-            }
-          </div>
-          <div class="unit-icon-grid">
-            ${entries
-              .map(([key, cnt]) => {
-                const splitHtml =
-                  isMine && !inCombat && total > 1
-                    ? `<label style="font-size:13.5px;margin-top:4px">Ayır: <input class="pixel-input split-input" data-unit="${key}" type="number" min="0" max="${cnt}" value="0" style="width:68px;padding:4px 6px" /></label>`
-                    : '';
-                return renderUnitIconCardHtml(key, cnt, owner?.color ?? '#3b82f6', splitHtml);
-              })
-              .join('')}
-          </div>
-          ${
-            isMine
-              ? `
-            <hr class="popup-divider" />
-            <div style="display:flex;gap:10px;flex-wrap:wrap">
-              ${
-                inCombat
-                  ? `<button class="pixel-btn danger-btn" id="btn-retreat-combat">🏃 Geri Çekil (%10 Kayıp Cezası)</button>`
-                  : total > 1
-                    ? `
-                      <button class="pixel-btn active-btn" id="btn-split-half">✂️ Yarıya Böl (50/50)</button>
-                      <button class="pixel-btn" id="btn-split-army">✂️ Belirtilen Sayılarla Ayır</button>
-                    `
-                    : ''
-              }
-              ${mergeable
-                .map(
-                  (m) =>
-                    `<button class="pixel-btn btn-merge-army" data-other="${m.id}">🔗 Yakın Kümeyle Birleştir (${getTotalSoldiers(m.units)} asker)</button>`,
-                )
-                .join('')}
-            </div>
-          `
-              : ''
-          }
-        </div>
-      `;
-
-      host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
-      host.querySelector('#btn-retreat-combat')?.addEventListener('click', () => {
-        const res = retreatFromCombat(this.state, army.id);
-        if (!res.ok) {
-          this.lastErrorMsg = res.error || 'Geri çekilemedi.';
-          this.renderModal();
-          return;
-        }
-        pushImportantToast(
-          this.state,
-          `🏃 Ordu geri çekiliyor (-${res.lostSoldiers ?? 0} kayıp).`,
-          'info',
-        );
-        this.openWindow(null, false);
-        this.updateLiveHUD();
-      });
-      host.querySelector('#btn-split-half')?.addEventListener('click', () => {
-        const res = splitArmyHalf(this.state, army.id);
-        if (!res.ok) {
-          this.lastErrorMsg = res.error || '';
-          this.renderModal();
-          return;
-        }
-        this.lastErrorMsg = '';
-        this.state.moveOrderMode = false;
-        setAutoPauseReason(this.state, 'move_order', false);
-        this.renderModal();
-        this.updateLiveHUD();
-      });
-      host.querySelector('#btn-split-army')?.addEventListener('click', () => {
-        const splitMap: Record<string, number> = {};
-        host.querySelectorAll<HTMLInputElement>('.split-input').forEach((inp) => {
-          const uKey = inp.dataset.unit!;
-          splitMap[uKey] = Number(inp.value);
-        });
-        const res = splitArmyStack(this.state, army.id, splitMap);
-        this.lastErrorMsg = res.ok ? '' : res.error || '';
-        this.renderModal();
-      });
-      host.querySelectorAll<HTMLButtonElement>('.btn-merge-army').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const otherId = btn.dataset.other!;
-          const res = mergeArmies(this.state, army.id, otherId);
-          this.lastErrorMsg = res.ok ? '' : res.error || '';
-          this.renderModal();
-        });
-      });
-      return;
-    }
-
     // 4. 2-PAGE 7-ACTION DIPLOMACY POPUP (`diplomacy`)
     if (this.activeWindow === 'diplomacy') {
       const others = Object.values(this.state.countries).filter((c) => c.id !== pid && !c.eliminated);
@@ -2708,7 +2721,7 @@ export class GameUIController {
               <div>🤝 Müttefikleri: <b>${summary.allies.map((id) => this.state.countries[id]?.name).join(', ') || 'Yok'}</b></div>
               <div>⚔️ Savaşta Oldukları: <b>${summary.wars.map((id) => this.state.countries[id]?.name).join(', ') || 'Yok'}</b></div>
               <div>📜 Aktif Anlaşmalarımız: <b>${[
-                edge.peaceTreaty ? '🕊️ Barış Antlaşması (Geçiş Hakkı)' : '',
+                edge.peaceTreaty ? '🕊️ Barış Antlaşması' : '',
                 napActive ? `🛡️ Saldırmazlık Paktı (${napDays} gün kaldı)` : '',
                 edge.tradeAgreement ? '💰 Ticaret Anlaşması (+%10 Gelir)' : '',
               ]

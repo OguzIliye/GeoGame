@@ -134,6 +134,7 @@ async function bootstrap(): Promise<void> {
     state.wounded = [];
     state.floatingEffects = [];
     state.activeEncounter = null;
+    state.warAlertQueue = [];
     state.placingBuildingType = null;
     state.placementHoverPoint = null;
     state.activeBuildingRegionId = null;
@@ -215,7 +216,6 @@ async function bootstrap(): Promise<void> {
     onEnterBuildingPlacement: enterBuildingPlacement,
     onCancelPlacementOrOrder: () => {
       clearAllTacticalModes();
-      if (ui.activeWindow === 'army') ui.openWindow(null, false);
       ui.syncFrame();
     },
     onSelectShipForOrder: (shipId: string) => {
@@ -376,13 +376,15 @@ async function bootstrap(): Promise<void> {
     heldPanKeys.clear();
   });
 
-  // Clicking on UI elements outside the map cancels army move order mode
+  // Clicking on UI elements outside the map cancels army move order mode (except bottom-right army panel)
   uiLayer.addEventListener('mousedown', (ev) => {
-    const insideQuickBuild = (ev.target as HTMLElement | null)?.closest('.quick-build-menu');
+    const targetEl = ev.target as HTMLElement | null;
+    const insideQuickBuild = targetEl?.closest('.quick-build-menu');
     if (!insideQuickBuild && ui.quickBuildTarget) {
       ui.setQuickBuildTarget(null);
     }
-    if (state.moveOrderMode) {
+    const insideArmyPanel = targetEl?.closest('#multi-army-panel');
+    if (state.moveOrderMode && !insideArmyPanel) {
       state.moveOrderMode = false;
       setAutoPauseReason(state, 'move_order', false);
       syncCursor();
@@ -498,7 +500,6 @@ async function bootstrap(): Promise<void> {
       isPanDown = false;
       if (ev.button === 2 && !panMoved) {
         clearAllTacticalModes();
-        if (ui.activeWindow === 'army') ui.openWindow(null, false);
         ui.syncFrame();
       } else {
         syncCursor();
@@ -545,10 +546,8 @@ async function bootstrap(): Promise<void> {
           const canCommand = !single.inCombatWithArmyId;
           state.moveOrderMode = canCommand;
           setAutoPauseReason(state, 'move_order', canCommand);
-          ui.openWindow('army', false);
         } else {
           cancelSelectionAndOrderMode(state);
-          if (ui.activeWindow === 'army') ui.openWindow(null, false);
         }
         syncCursor();
         ui.syncFrame();
@@ -579,7 +578,13 @@ async function bootstrap(): Promise<void> {
       return;
     }
 
-    if (state.phase !== 'playing' || state.activeEncounter) return;
+    if (
+      state.phase !== 'playing' ||
+      state.activeEncounter ||
+      (state.warAlertQueue?.length ?? 0) > 0
+    ) {
+      return;
+    }
 
     // Outside active arena frame -> cancel tactical modes
     if (
@@ -670,7 +675,6 @@ async function bootstrap(): Promise<void> {
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
           setAutoPauseReason(state, 'move_order', false);
-          if (ui.activeWindow === 'army') ui.openWindow(null, false);
           syncCursor();
           return;
         }
@@ -681,7 +685,6 @@ async function bootstrap(): Promise<void> {
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
           setAutoPauseReason(state, 'move_order', false);
-          if (ui.activeWindow === 'army') ui.openWindow(null, false);
           syncCursor();
           return;
         }
@@ -697,7 +700,6 @@ async function bootstrap(): Promise<void> {
           state.moveOrderMode = false;
           setAutoPauseReason(state, 'move_order', false);
           selectSingleArmy(state, clickedArmy.id);
-          if (ui.activeWindow === 'army') ui.openWindow(null, false);
           syncCursor();
           ui.syncFrame();
           return;
@@ -709,13 +711,11 @@ async function bootstrap(): Promise<void> {
           if (!res.ok && res.error) pushImportantToast(state, res.error, 'info');
           state.moveOrderMode = false;
           setAutoPauseReason(state, 'move_order', false);
-          if (ui.activeWindow === 'army') ui.openWindow(null, false);
           syncCursor();
           return;
         }
 
         cancelSelectionAndOrderMode(state);
-        if (ui.activeWindow === 'army') ui.openWindow(null, false);
         syncCursor();
         return;
       }
@@ -735,16 +735,15 @@ async function bootstrap(): Promise<void> {
       }
     }
 
-    // B. Normal Selection Mode
-    if (clickedArmy) {
+    // B. Normal Selection Mode (select own army without opening any modal; actions appear in bottom-right panel)
+    if (clickedArmy && clickedArmy.countryId === state.playerCountryId) {
       ui.setQuickBuildTarget(null);
       selectSingleArmy(state, clickedArmy.id);
-      const canCommand =
-        clickedArmy.countryId === state.playerCountryId && !clickedArmy.inCombatWithArmyId;
+      const canCommand = !clickedArmy.inCombatWithArmyId;
       state.moveOrderMode = canCommand;
       setAutoPauseReason(state, 'move_order', canCommand);
-      ui.openWindow('army', false);
       syncCursor();
+      ui.syncFrame();
       return;
     }
 
@@ -774,7 +773,7 @@ async function bootstrap(): Promise<void> {
     if (clickedReg) {
       cancelSelectionAndOrderMode(state);
       state.selectedRegionId = clickedReg.id;
-      if (ui.activeWindow === 'army' || BUILDING_POPUP_ACTIVE(ui.activeWindow)) {
+      if (BUILDING_POPUP_ACTIVE(ui.activeWindow)) {
         ui.openWindow(null, false);
       }
 
@@ -796,7 +795,6 @@ async function bootstrap(): Promise<void> {
     // Clicked open sea -> clear selection & menus
     clearAllTacticalModes();
     state.selectedRegionId = null;
-    if (ui.activeWindow === 'army') ui.openWindow(null, false);
     syncCursor();
   });
 

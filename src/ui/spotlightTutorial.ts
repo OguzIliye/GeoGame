@@ -255,7 +255,6 @@ export class SpotlightTutorialController {
       st === '3_order_equip' ||
       st === '4_pick_barracks' ||
       st === '4_train_soldiers' ||
-      st === '6_split_half' ||
       st === '7_pick_rival' ||
       st === '7_declare_war' ||
       st === '9_pick_hospital';
@@ -307,15 +306,12 @@ export class SpotlightTutorialController {
       const a = this.getPlayerArmies(pid)[0];
       if (a) this.camera.focusOnPoint(a.x, a.y);
     } else if (st === '5_move_border') {
-      if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false, true);
       const bReg = this.playerBorderRegionId ? this.state.regions[this.playerBorderRegionId] : null;
       if (bReg) this.camera.focusOnPoint(bReg.centroid[0], bReg.centroid[1]);
     } else if (st === '8a_intercept' && this.vanguardArmyId && this.state.armies[this.vanguardArmyId]) {
-      if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false, true);
       const v = this.state.armies[this.vanguardArmyId];
       this.camera.focusOnPoint(v.x, v.y);
     } else if (st === '8b_attack_region' && this.rivalBorderRegionId) {
-      if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false, true);
       const rReg = this.state.regions[this.rivalBorderRegionId];
       if (rReg) this.camera.focusOnPoint(rReg.centroid[0], rReg.centroid[1]);
     }
@@ -551,7 +547,6 @@ export class SpotlightTutorialController {
       case '5_move_border': {
         const moving = this.getPlayerArmies(pid).some((a) => a.targetX !== null);
         if (moving) {
-          if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false);
           this.setStage('5_wait_march');
         }
         break;
@@ -565,14 +560,15 @@ export class SpotlightTutorialController {
       }
 
       case '6_click_army':
-        if (this.ui.activeWindow === 'army' && this.state.selectedArmyId) {
+        if (
+          this.state.selectedArmyId &&
+          this.state.armies[this.state.selectedArmyId]?.countryId === pid
+        ) {
           this.setStage('6_split_half');
         }
         break;
       case '6_split_half':
         if (this.getPlayerArmies(pid).length >= 2) {
-          this.ui.closeButtonLockedByTutorial = false;
-          this.ui.openWindow(null, false);
           this.setStage('6_merge_armies');
         }
         break;
@@ -643,7 +639,6 @@ export class SpotlightTutorialController {
           !this.state.armies[this.vanguardArmyId] ||
           myArmies.some((a) => Boolean(a.inCombatWithArmyId) || a.targetX !== null || a.targetArmyId !== null)
         ) {
-          if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false);
           this.setStage('8a_wait_defense');
         }
         break;
@@ -682,7 +677,6 @@ export class SpotlightTutorialController {
             Object.values(this.state.regions).some((r) => r.capture?.attackerCountryId === pid),
         );
         if (movingToEnemy) {
-          if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false);
           this.initialRivalRegionOwnerChecked = true;
           this.setStage('8b_wait_capture');
         }
@@ -1160,43 +1154,34 @@ export class SpotlightTutorialController {
       }
 
       case '6_split_half': {
-        const pt = centerOfSelector('#btn-split-half') ?? [viewW * 0.35, 420];
+        const sel = '#btn-split-half';
+        const pt = centerOfSelector(sel) ?? [viewW - 190, viewH - 96];
         return {
           cx: pt[0],
           cy: pt[1],
+          targetSelector: sel,
           stepBadge: 'Adım 7 / 11',
-          title: '✂️ Yarıya Böl (50/50)',
-          body: 'Ordu penceresindeki <b>✂️ Yarıya Böl (50/50)</b> butonuna tıklayarak tek tıkla 2 ayrı birlik oluşturun.',
+          title: '✂️ Sağ Alttan 2\'ye Böl',
+          body: 'Sağ altta açılan ordu panelindeki <b>✂️ 2\'ye Böl</b> butonuna tıklayarak ordunuzu iki ayrı birliğe ayırın.',
           iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
         };
       }
 
       case '6_merge_armies': {
-        const mergeBtnPt = centerOfSelector('#btn-multi-merge');
+        const mergeBtnPt =
+          this.state.selectedArmyIds.length >= 2
+            ? centerOfSelector('#btn-multi-merge:not([disabled])')
+            : null;
         if (mergeBtnPt) {
           return {
             cx: mergeBtnPt[0],
             cy: mergeBtnPt[1],
             targetSelector: '#btn-multi-merge',
             stepBadge: 'Adım 7 / 11',
-            title: '🔗 Seçilenleri Birleştir!',
-            body: 'Süper! Sağ altta açılan çoklu ordu panelindeki <b>🔗 Seçilenleri Birleştir</b> butonuna tıklayın.',
+            title: '🔗 Birleştir!',
+            body: 'Süper! Sağ alttaki ordu panelinden <b>🔗 Birleştir</b> butonuna tıklayarak seçili birlikleri birleştirin.',
             iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
           };
-        }
-        if (this.ui.activeWindow === 'army') {
-          const modalMergePt = centerOfSelector('.btn-merge-army');
-          if (modalMergePt) {
-            return {
-              cx: modalMergePt[0],
-              cy: modalMergePt[1],
-              targetSelector: '.btn-merge-army',
-              stepBadge: 'Adım 7 / 11',
-              title: '🔗 Yakın Kümeyle Birleştir!',
-              body: 'Ordu penceresindeki <b>🔗 Yakın Kümeyle Birleştir</b> butonuna tıklayın.',
-              iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
-            };
-          }
         }
         const myArmies = this.getPlayerArmies(pid);
         if (this.state.selectedArmyId) {
@@ -1206,8 +1191,8 @@ export class SpotlightTutorialController {
             cx: pt[0],
             cy: pt[1],
             stepBadge: 'Adım 7 / 11',
-            title: '🔗 Diğer Birliğin Üstüne Tıkla!',
-            body: 'Haritada diğer dost birliğin üzerine sol tıklayarak iki birliği birleştirin.',
+            title: '🔗 İki Birliği Birleştir!',
+            body: 'Haritada <b>diğer dost birliğin üzerine sol tıklayın</b> (veya sol tık sürükleyip ikisini kutu içine alarak sağ alttan <b>🔗 Birleştir</b>\'e basın).',
             iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
           };
         }
@@ -1218,7 +1203,7 @@ export class SpotlightTutorialController {
           cy: pt[1],
           stepBadge: 'Adım 7 / 11',
           title: '🟩 Kutu Seçimiyle İki Birliği Seç',
-          body: 'Haritada <b>sol tık basılı tutup sürükleyerek (Box-Select)</b> iki birliği birden çerçeve içine alın (veya birine tıklayıp diğerinin üstüne tıklayın)!',
+          body: 'Haritada <b>sol tık basılı tutup sürükleyerek (Box-Select)</b> iki birliği birden çerçeve içine alın ve sağ alttan <b>🔗 Birleştir</b>\'e tıklayın!',
           iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
         };
       }
@@ -1715,7 +1700,17 @@ export class SpotlightTutorialController {
               this.stage === '6_merge_armies' && !info.targetSelector
                 ? SPOTLIGHT_RADIUS_PX + 56
                 : SPOTLIGHT_RADIUS_PX + 20;
-            if (cy >= cr.top - pad && cy <= cr.bottom + pad) {
+            const panelEl =
+              typeof document !== 'undefined'
+                ? document.getElementById('multi-army-panel')
+                : null;
+            const pr =
+              panelEl && panelEl.style.display !== 'none'
+                ? panelEl.getBoundingClientRect()
+                : null;
+            if (pr && pr.width > 0 && pr.height > 0 && cr.right > pr.left - 10 && cr.bottom > pr.top - 10) {
+              cardEl.style.top = `${Math.max(10, Math.round(pr.top - cr.height - 14))}px`;
+            } else if (cy >= cr.top - pad && cy <= cr.bottom + pad) {
               if (cy + pad + cr.height <= viewH - 10) {
                 cardEl.style.top = `${Math.round(cy + pad)}px`;
               } else {

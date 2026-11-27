@@ -150,6 +150,7 @@ export interface ArmyStack {
   embarkingShipId: string | null;
   retreatingUntilSimSec?: number;
   combatLossCarry?: number;
+  evacuatingHome?: boolean;
 }
 
 export interface TransportShip {
@@ -196,7 +197,8 @@ export type AutoPauseReason =
   | 'tutorial'
   | 'building_popup'
   | 'tutorial_spotlight'
-  | 'save_exit';
+  | 'save_exit'
+  | 'war_alert';
 
 export interface EncounterPrompt {
   id: string;
@@ -267,6 +269,7 @@ export interface GameState {
   placementHoverPoint: Point | null;
   autoPauseReasons: AutoPauseReason[];
   activeEncounter: EncounterPrompt | null;
+  warAlertQueue?: string[];
   encounterCooldownUntilSimSec: Record<string, number>;
   armyFocusIndex: number;
   focusPing: FocusPing | null;
