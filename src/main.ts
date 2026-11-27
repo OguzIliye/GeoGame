@@ -299,7 +299,7 @@ async function bootstrap(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
-  worldCountries = await fetchWorldCountries('/assets/world-50m.json');
+  worldCountries = await fetchWorldCountries('./assets/world-50m.json');
   camera.setBounds(WORLD_BOUNDS, canvas.width, canvas.height, true);
   ui.forceRefresh();
 
