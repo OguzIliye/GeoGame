@@ -20,7 +20,12 @@ import type {
   WeaponId,
 } from '../types';
 import { setAutoPauseReason } from './calendar';
-import { canArmyEnterCountryTerritory, declareWar, getRelationStatus } from './diplomacy';
+import {
+  canArmyEnterCountryTerritory,
+  declareWar,
+  getRelationStatus,
+  hasTransitPact,
+} from './diplomacy';
 import {
   getActiveBuildingLevel,
   getCountryRegions,
@@ -135,17 +140,29 @@ export function pickArmyAtPoint(
   state: GameState,
   pt: Point,
   radiusMapUnits = 0.65,
+  ignorePactForCountryId?: string | null,
 ): ArmyStack | null {
   let best: ArmyStack | null = null;
   let bestD2 = radiusMapUnits * radiusMapUnits;
+  let bestOwn = false;
   for (const army of Object.values(state.armies)) {
     if (getTotalSoldiers(army.units) <= 0) continue;
+    if (
+      ignorePactForCountryId &&
+      army.countryId !== ignorePactForCountryId &&
+      hasTransitPact(state, ignorePactForCountryId, army.countryId)
+    ) {
+      continue;
+    }
     const dx = pt[0] - army.x;
     const dy = pt[1] - army.y;
     const d2 = dx * dx + dy * dy;
-    if (d2 <= bestD2) {
+    if (d2 > radiusMapUnits * radiusMapUnits) continue;
+    const isOwn = Boolean(ignorePactForCountryId && army.countryId === ignorePactForCountryId);
+    if (!best || (isOwn && !bestOwn) || (isOwn === bestOwn && d2 <= bestD2)) {
       bestD2 = d2;
       best = army;
+      bestOwn = isOwn;
     }
   }
   return best;
@@ -481,6 +498,65 @@ export function buildNaturalMarchWaypoints(
   return pts;
 }
 
+function segmentCrossesForbiddenTerritory(
+  state: GameState,
+  countryId: string,
+  from: Point,
+  to: Point,
+): boolean {
+  const samples = 10;
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const px = from[0] + (to[0] - from[0]) * t;
+    const py = from[1] + (to[1] - from[1]) * t;
+    const hit = pickRegionAtPoint([px, py], state.regions);
+    if (hit && !canArmyEnterCountryTerritory(state, countryId, hit.ownerId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function findPassableRegionPath(
+  state: GameState,
+  countryId: string,
+  startRegionId: string,
+  targetRegionId: string,
+): Region[] | null {
+  const startReg = state.regions[startRegionId];
+  const targetReg = state.regions[targetRegionId];
+  if (!startReg || !targetReg) return null;
+  if (!canArmyEnterCountryTerritory(state, countryId, targetReg.ownerId)) return null;
+  if (startRegionId === targetRegionId) return [targetReg];
+
+  const queue: string[] = [startRegionId];
+  const prev = new Map<string, string | null>([[startRegionId, null]]);
+
+  while (queue.length > 0) {
+    const curId = queue.shift()!;
+    if (curId === targetRegionId) {
+      const path: Region[] = [];
+      let trace: string | null = targetRegionId;
+      while (trace !== null) {
+        path.push(state.regions[trace]);
+        trace = prev.get(trace) ?? null;
+      }
+      path.reverse();
+      return path;
+    }
+    const cur = state.regions[curId];
+    if (!cur) continue;
+    for (const nbId of cur.neighbors) {
+      if (prev.has(nbId)) continue;
+      const nb = state.regions[nbId];
+      if (!nb || !canArmyEnterCountryTerritory(state, countryId, nb.ownerId)) continue;
+      prev.set(nbId, curId);
+      queue.push(nbId);
+    }
+  }
+  return null;
+}
+
 export function orderArmyMoveToRegion(
   state: GameState,
   armyId: string,
@@ -494,19 +570,38 @@ export function orderArmyMoveToRegion(
   if (!canArmyEnterCountryTerritory(state, army.countryId, reg.ownerId)) {
     return {
       ok: false,
-      error: 'Nötr ülkenin toprağına girilemez! Önce Diplomasi penceresinden savaş ilan edin.',
+      error: 'Bu ülkenin topraklarına giriş izniniz yok.',
     };
   }
 
-  clearCaptureByArmy(state, army.id);
   const dest: Point = destPoint ? [destPoint[0], destPoint[1]] : [reg.centroid[0], reg.centroid[1]];
-  const wps = buildNaturalMarchWaypoints(
-    state,
-    army.countryId,
-    [army.x, army.y],
-    dest,
-    `${army.id}_${targetRegionId}`,
-  );
+  let wps: Point[];
+
+  if (segmentCrossesForbiddenTerritory(state, army.countryId, [army.x, army.y], dest)) {
+    const startReg =
+      state.regions[army.currentRegionId] ?? pickRegionAtPoint([army.x, army.y], state.regions);
+    const regionPath = startReg
+      ? findPassableRegionPath(state, army.countryId, startReg.id, reg.id)
+      : null;
+    if (!regionPath) {
+      return {
+        ok: false,
+        error: 'Bu ülkenin topraklarına giriş izniniz yok.',
+      };
+    }
+    wps = regionPath.slice(1, -1).map((r): Point => [r.centroid[0], r.centroid[1]]);
+    wps.push(dest);
+  } else {
+    wps = buildNaturalMarchWaypoints(
+      state,
+      army.countryId,
+      [army.x, army.y],
+      dest,
+      `${army.id}_${targetRegionId}`,
+    );
+  }
+
+  clearCaptureByArmy(state, army.id);
   army.waypoints = wps;
   army.targetX = wps[0][0];
   army.targetY = wps[0][1];
@@ -805,6 +900,7 @@ export function checkPlayerArmyEncounters(state: GameState): void {
       if (myArmy.targetArmyId === other.id) continue;
 
       const dist = Math.hypot(myArmy.x - other.x, myArmy.y - other.y);
+      if (hasTransitPact(state, pid, other.countryId)) continue;
       const rel = getRelationStatus(state, pid, other.countryId);
       if (
         rel === 'war' &&
@@ -1480,9 +1576,22 @@ export function tickArmiesCombatAndShips(
           army.targetArmyId = null;
         }
       } else {
-        army.x += (dx / dist) * step;
-        army.y += (dy / dist) * step;
-        const under = pickRegionAtPoint([army.x, army.y], state.regions);
+        const nextX = army.x + (dx / dist) * step;
+        const nextY = army.y + (dy / dist) * step;
+        const under = pickRegionAtPoint([nextX, nextY], state.regions);
+        if (
+          under &&
+          under.id !== army.currentRegionId &&
+          !canArmyEnterCountryTerritory(state, army.countryId, under.ownerId)
+        ) {
+          army.targetX = null;
+          army.targetY = null;
+          army.waypoints = [];
+          army.targetRegionId = null;
+          continue;
+        }
+        army.x = nextX;
+        army.y = nextY;
         if (under) army.currentRegionId = under.id;
 
         // Check mid-step auto-merge when walking to mergeTargetArmyId

@@ -3,8 +3,8 @@
 > [UPDATE_DESIGN_V1_3.md](UPDATE_DESIGN_V1_3.md) kapsamındaki 5 aşamanın ilerleme durumu.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 1 — Global `SIM_TIME_SCALE = 1/3` (3× Yavaş Tempo) & Tek Yaralı Birliği
-- **Tamamlanan Aşamalar:** 1 / 5
+- **Aktif Aşama:** Aşama 2 — Toprak Geçiş Kuralları & Anlaşmalı Ülkelerle Etkileşimsizlik
+- **Tamamlanan Aşamalar:** 2 / 5
 - **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -16,9 +16,9 @@
 - [x] Aşama 1 testler + temiz build + git commit
 
 ## Aşama 2 — Toprak Geçiş Kuralları & Anlaşmalı Ülkelerle Etkileşimsizlik
-- [ ] Yalnızca savaşta veya barış/saldırmazlık/ittifak anlaşmalı ülke toprağına giriş izni (nötr ülkeye giriş engeli, AI dahil)
-- [ ] Anlaşmalı ülkelerin askerleri arasında sıfır etkileşim (encounter, çatışma, hedefleme yok)
-- [ ] Aşama 2 testler + temiz build + git commit
+- [x] Yalnızca savaşta veya barış/saldırmazlık/ittifak anlaşmalı ülke toprağına giriş izni (nötr ülkeye giriş engeli, AI dahil)
+- [x] Anlaşmalı ülkelerin askerleri arasında sıfır etkileşim (encounter, çatışma, hedefleme yok)
+- [x] Aşama 2 testler + temiz build + git commit
 
 ## Aşama 3 — Daha Az Agresif AI & Barışta Maks. 2 Birlik Kuralı
 - [ ] Yüksek saldırı eşiği (`≥ 1.6×`) ve düşük savaş ilan sıklığı

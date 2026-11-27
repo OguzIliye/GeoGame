@@ -171,6 +171,7 @@ export interface DiplomacyEdge {
   score: number; // -100..+100
   nonAggressionUntilDay?: number;
   tradeAgreement?: boolean;
+  peaceTreaty?: boolean;
   lastGiftDayByCountry?: Record<string, number>;
 }
 

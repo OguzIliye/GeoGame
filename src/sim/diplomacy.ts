@@ -60,6 +60,13 @@ export function getNonAggressionRemainingDays(state: GameState, a: string, b: st
   return Math.max(0, Math.ceil((edge.nonAggressionUntilDay ?? 0) - state.simDaysElapsed));
 }
 
+export function hasTransitPact(state: GameState, a: string, b: string): boolean {
+  if (a === b) return false;
+  const edge = getDiplomacyEdge(state, a, b);
+  if (!edge || edge.status === 'war') return false;
+  return edge.status === 'allied' || Boolean(edge.peaceTreaty) || isNonAggressionActive(state, a, b);
+}
+
 export function canArmyEnterCountryTerritory(
   state: GameState,
   armyCountryId: string,
@@ -67,7 +74,7 @@ export function canArmyEnterCountryTerritory(
 ): boolean {
   if (armyCountryId === territoryOwnerId) return true;
   const rel = getRelationStatus(state, armyCountryId, territoryOwnerId);
-  return rel === 'war' || rel === 'allied';
+  return rel === 'war' || hasTransitPact(state, armyCountryId, territoryOwnerId);
 }
 
 export function estimateCountryMilitaryPower(state: GameState, countryId: string): number {
@@ -102,6 +109,7 @@ export function declareWar(
   edge.status = 'war';
   edge.score = -85;
   edge.tradeAgreement = false;
+  edge.peaceTreaty = false;
   edge.nonAggressionUntilDay = 0;
 
   const atkName = state.countries[attackerId]?.name ?? attackerId;
@@ -122,6 +130,7 @@ export function declareWar(
         allyEdge.status = 'war';
         allyEdge.score = -70;
         allyEdge.tradeAgreement = false;
+        allyEdge.peaceTreaty = false;
         allyEdge.nonAggressionUntilDay = 0;
         if (attackerId === pid || otherId === pid) {
           pushImportantToast(
@@ -235,6 +244,7 @@ export function proposePeace(
 
   if (accepted) {
     edge.status = 'neutral';
+    edge.peaceTreaty = true;
     edge.score = -15;
 
     // Clear active captures & combats between these two countries

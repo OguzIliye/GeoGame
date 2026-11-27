@@ -2708,6 +2708,7 @@ export class GameUIController {
               <div>🤝 Müttefikleri: <b>${summary.allies.map((id) => this.state.countries[id]?.name).join(', ') || 'Yok'}</b></div>
               <div>⚔️ Savaşta Oldukları: <b>${summary.wars.map((id) => this.state.countries[id]?.name).join(', ') || 'Yok'}</b></div>
               <div>📜 Aktif Anlaşmalarımız: <b>${[
+                edge.peaceTreaty ? '🕊️ Barış Antlaşması (Geçiş Hakkı)' : '',
                 napActive ? `🛡️ Saldırmazlık Paktı (${napDays} gün kaldı)` : '',
                 edge.tradeAgreement ? '💰 Ticaret Anlaşması (+%10 Gelir)' : '',
               ]

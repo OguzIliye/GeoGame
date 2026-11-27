@@ -631,7 +631,7 @@ async function bootstrap(): Promise<void> {
     }
 
     const hitRadius = Math.max(0.32, 17 / camera.scale);
-    const clickedArmy = pickArmyAtPoint(state, pt, hitRadius);
+    const clickedArmy = pickArmyAtPoint(state, pt, hitRadius, state.playerCountryId);
     const clickedShip = pickShipAtPoint(state, pt, hitRadius);
     const clickedBuildingReg = pickPlayerBuildingRegionNearPoint(
       state,
