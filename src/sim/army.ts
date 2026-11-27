@@ -1056,6 +1056,43 @@ function takeCasualtiesFromUnits(
   return lost;
 }
 
+function mergeIntoWoundedGroup(
+  existing: GameState['wounded'][number],
+  addedUnits: Record<string, number>,
+): void {
+  const prevCount = getTotalSoldiers(existing.units);
+  let addedCount = 0;
+  for (const [k, v] of Object.entries(addedUnits)) {
+    if (v > 0) {
+      existing.units[k] = (existing.units[k] ?? 0) + v;
+      addedCount += v;
+    }
+  }
+  if (existing.travelProgress >= 1 && prevCount > 0 && addedCount > 0) {
+    existing.healElapsedSec *= prevCount / (prevCount + addedCount);
+  }
+}
+
+export function coalesceWoundedByCountry(state: GameState): void {
+  if (state.wounded.length <= 1) return;
+  const byCountry = new Map<string, GameState['wounded'][number]>();
+  for (const w of state.wounded) {
+    const cur = byCountry.get(w.countryId);
+    if (!cur) {
+      byCountry.set(w.countryId, w);
+    } else {
+      mergeIntoWoundedGroup(cur, w.units);
+      if (cur.waitingForHospital && !w.waitingForHospital) {
+        cur.waitingForHospital = false;
+        cur.toRegionId = w.toRegionId;
+        cur.to = [...w.to];
+        cur.travelProgress = w.travelProgress;
+      }
+    }
+  }
+  state.wounded = [...byCountry.values()];
+}
+
 function dispatchEscapedWoundedToHospital(
   state: GameState,
   countryId: string,
@@ -1086,20 +1123,21 @@ function dispatchEscapedWoundedToHospital(
   }
   if (totalEscaped <= 0) return;
 
-  if (holdOnFieldForTutorial) {
-    // Coalesce into existing field-waiting wounded batch if close
-    const existingField = state.wounded.find(
-      (w) =>
-        w.countryId === countryId &&
-        w.waitingForHospital &&
-        Math.hypot(w.from[0] - origin[0], w.from[1] - origin[1]) < 0.8,
-    );
-    if (existingField) {
-      for (const [k, v] of Object.entries(escapedUnits)) {
-        existingField.units[k] = (existingField.units[k] ?? 0) + v;
-      }
-      return;
+  // v1.3 Rule: Single WoundedGroup per country — coalesce into any existing batch of this country!
+  const existingGroup = state.wounded.find((w) => w.countryId === countryId);
+  if (existingGroup) {
+    mergeIntoWoundedGroup(existingGroup, escapedUnits);
+    if (existingGroup.waitingForHospital && hospReg) {
+      const [hx, hy] = getRegionBuildingPoint(hospReg);
+      existingGroup.waitingForHospital = false;
+      existingGroup.toRegionId = hospReg.id;
+      existingGroup.to = [hx, hy];
+      existingGroup.travelProgress = 0;
     }
+    return;
+  }
+
+  if (holdOnFieldForTutorial) {
     state.wounded.push({
       id: nextUid('wnd'),
       countryId,
@@ -1649,7 +1687,8 @@ export function tickArmiesCombatAndShips(
     }
   }
 
-  // 5. Process Wounded Batches (field-waiting in tutorial or walking to Hospital & healing back into original unit types)
+  // 5. Process Wounded Batches (single WoundedGroup per country)
+  coalesceWoundedByCountry(state);
   const remainingWounded = [];
   for (const w of state.wounded) {
     if (w.waitingForHospital) {

@@ -13,6 +13,7 @@ import {
   LOAN_CONFIG,
   SHIELD_ORDER,
   SHIELDS,
+  simSecToRealSec,
   WEAPON_ORDER,
   WEAPONS,
 } from '../config/balance';
@@ -134,6 +135,7 @@ export interface GameUICallbacks {
   onCancelPlacementOrOrder: () => void;
   onSelectShipForOrder?: (shipId: string) => void;
   onRestartInteractiveTutorial?: () => void;
+  onModalInteraction?: () => void;
 }
 
 function escapeAttr(text: string): string {
@@ -695,7 +697,7 @@ export class GameUIController {
           <div class="modal-header">
             <div class="popup-title-wrap">
               <img class="popup-header-icon" src="${uniUri}" alt="" />
-              <strong>📖 Hızlı Rehber & Kısayol Özeti (v1.2)</strong>
+              <strong>📖 Hızlı Rehber & Kısayol Özeti (v1.3)</strong>
             </div>
             <button class="pixel-btn" id="btn-tut-close">✕</button>
           </div>
@@ -703,15 +705,15 @@ export class GameUIController {
             <div class="divided-item" style="display:flex;align-items:center;gap:12px">
               <img class="popup-row-icon" src="${bankUri}" alt="" />
               <div>
-                <strong>5 Saniyelik Ekonomi & Banka Kredisi:</strong>
-                Başlangıçta <code>100 💰</code> ve <code>1 Üniversite</code> bulunur. Alt menüdeki <b>🏪 Mağaza</b>'dan Banka (<code>100 💰</code>) kurun; her <code>5 sn</code>'de toplu gelir yatar. Bankaya tıklayarak <code>+500 / +1.000 / +10.000 💰</code> kredi alabilirsiniz.
+                <strong>15 Saniyelik Ekonomi & Banka Kredisi:</strong>
+                Başlangıçta <code>100 💰</code> ve <code>1 Üniversite</code> bulunur. Alt menüdeki <b>🏪 Mağaza</b>'dan Banka (<code>100 💰</code>) kurun; her <code>15 sn</code>'de toplu gelir yatar. Bankaya tıklayarak <code>+500 / +1.000 / +10.000 💰</code> kredi alabilirsiniz.
               </div>
             </div>
             <div class="divided-item" style="display:flex;align-items:center;gap:12px">
               <img class="popup-row-icon" src="${facUri}" alt="" />
               <div>
                 <strong>Bina-Bazlı Bağımsız Fabrika & Kışla:</strong>
-                Haritadaki kendi binanıza tıklayınca oyun durur ve o binanın popup'ı açılır. Her Fabrika paralel hatlarda silah/kalkan üretir (<code>2–15 sn</code>); her Kışla kendi konumunda asker çıkarır.
+                Haritadaki kendi binanıza tıklayınca oyun durur ve o binanın popup'ı açılır. Her Fabrika paralel hatlarda silah/kalkan üretir (<code>6–45 sn</code>); her Kışla kendi konumunda asker çıkarır.
               </div>
             </div>
             <div class="divided-item" style="display:flex;align-items:center;gap:12px">
@@ -862,14 +864,14 @@ export class GameUIController {
 
         <div class="hud-group">
           <div class="hud-money-box">
-            <span>💰 <b id="hud-money">100</b> (<span id="hud-money-5s">+25</span>/5sn)</span>
-            <div class="hud-income-bar-track" data-hover-tip="Her 5 simülasyon saniyesinde toplu gelir kasaya eklenir.">
+            <span>💰 <b id="hud-money">100</b> (<span id="hud-money-5s">+25</span>/15sn)</span>
+            <div class="hud-income-bar-track" data-hover-tip="Her 15 gerçek saniyede toplu gelir kasaya eklenir.">
               <div id="hud-income-bar-fill" class="hud-income-bar-fill"></div>
             </div>
             <div id="hud-money-float-host"></div>
           </div>
-          <span id="hud-debt-badge" class="hud-debt-badge" style="display:none" data-hover-tip="Banka borcu: her 5 sn gelirinin %25'i otomatik düşülür. Bankayı açmak için tıklayın.">🏦 Borç: 0💰</span>
-          <span>👥 <b id="hud-mp">50</b> (<span id="hud-mp-rate">+1</span>/s)</span>
+          <span id="hud-debt-badge" class="hud-debt-badge" style="display:none" data-hover-tip="Banka borcu: her 15 sn gelirinin %25'i otomatik düşülür. Bankayı açmak için tıklayın.">🏦 Borç: 0💰</span>
+          <span>👥 <b id="hud-mp">50</b> (<span id="hud-mp-rate">+1</span>/3sn)</span>
           <span>❤️ <b id="hud-health">%50</b></span>
           <span>⚔️ <b id="hud-soldiers">0</b></span>
           <button class="pixel-btn" id="btn-cycle-army" data-key-action="cycleArmy">🎯 Ordum [${qLabel}]</button>
@@ -1700,7 +1702,7 @@ export class GameUIController {
                         <div>
                           <strong>${spec.name}</strong> — <b style="color:#fde047">${spec.cost} 💰</b>
                           <span class="badge" style="margin-left:6px">Kurulu: ${count}</span>
-                          <div class="muted">${spec.description} (İnşa: ${spec.buildSec} sn)</div>
+                          <div class="muted">${spec.description} (İnşa: ${simSecToRealSec(spec.buildSec)} sn)</div>
                         </div>
                       </div>
                       <button class="pixel-btn btn-place-building" data-shop-type="${bt}" data-type="${bt}" ${disabledCoast ? 'disabled' : ''}>
@@ -1758,7 +1760,7 @@ export class GameUIController {
               <button class="pixel-btn close-win" ${closeBtnAttrs}>✕</button>
             </div>
             <div class="status-line">
-              ⏳ İnşaat İlerlemesi: <b>%${pct}</b> (${reg.building.progressSec.toFixed(1)} / ${reg.building.totalSec} sn) — Pencereyi kapattığınızda inşaat kaldığı yerden devam eder.
+              ⏳ İnşaat İlerlemesi: <b>%${pct}</b> (${simSecToRealSec(reg.building.progressSec)} / ${simSecToRealSec(reg.building.totalSec)} sn) — Pencereyi kapattığınızda inşaat kaldığı yerden devam eder.
             </div>
             ${this.renderDemolishFooterHtml(reg)}
           </div>
@@ -1791,24 +1793,24 @@ export class GameUIController {
               <div class="divided-item">
                 <div class="card-row">
                   <span>🏦 Toplam Aktif Banka Sayısı:</span>
-                  <b>${bankCount} Adet (Her ek Banka +60 💰 / 5sn)</b>
+                  <b>${bankCount} Adet (Her ek Banka +60 💰 / 15sn)</b>
                 </div>
               </div>
               <div class="divided-item">
                 <div class="card-row">
-                  <span>💰 5 Saniyelik Toplam Gelir:</span>
-                  <b>Brüt: +${gross5s} 💰 / 5sn | Net Kasaya Giren: <span style="color:#4ade80">+${net5s} 💰 / 5sn</span></b>
+                  <span>💰 15 Saniyelik Toplam Gelir:</span>
+                  <b>Brüt: +${gross5s} 💰 / 15sn | Net Kasaya Giren: <span style="color:#4ade80">+${net5s} 💰 / 15sn</span></b>
                 </div>
               </div>
               <div class="divided-item">
                 <div class="card-row">
                   <span>📊 Güncel Borç Durumu (Tavan: ${LOAN_CONFIG.MAX_DEBT} 💰):</span>
-                  <b style="color:${p.debt > 0 ? '#fca5a5' : '#86efac'}">${Math.ceil(p.debt)} 💰 ${p.debt > 0 ? `(Her 5 sn'de -${deduct5s} 💰 otomatik kesinti)` : '(Borç Yok)'}</b>
+                  <b style="color:${p.debt > 0 ? '#fca5a5' : '#86efac'}">${Math.ceil(p.debt)} 💰 ${p.debt > 0 ? `(Her 15 sn'de -${deduct5s} 💰 otomatik kesinti)` : '(Borç Yok)'}</b>
                 </div>
               </div>
               <div class="divided-item">
                 <h4>💳 Banka Kredisi Al (%15 Faiz — Maks. Borç Tavanı: 20.000 💰)</h4>
-                <div class="muted" style="margin-bottom:10px">Alınan krediye %15 faiz eklenir; her 5 sn'lik brüt gelirin %25'i borçtan otomatik düşülür.</div>
+                <div class="muted" style="margin-bottom:10px">Alınan krediye %15 faiz eklenir; her 15 sn'lik brüt gelirin %25'i borçtan otomatik düşülür.</div>
                 <div style="display:flex;gap:10px;flex-wrap:wrap">
                   ${LOAN_CONFIG.OPTIONS.map((amt) => {
                     const withInterest = Math.round(amt * (1 + LOAN_CONFIG.INTEREST_RATE));
@@ -1878,7 +1880,7 @@ export class GameUIController {
               ? `${sp.researchCost} 💰 (⏳)`
               : `${sp.researchCost} 💰`;
           const tip = escapeAttr(
-            `T${sp.tier} ${sp.name}\nHasar: ${sp.damage}\nAraştırma: ${sp.researchCost} Para / ${sp.researchSec} sn\nFabrika Üretimi: ${sp.prodCost} Para / ${sp.prodSec} sn`,
+            `T${sp.tier} ${sp.name}\nHasar: ${sp.damage}\nAraştırma: ${sp.researchCost} Para / ${simSecToRealSec(sp.researchSec)} sn\nFabrika Üretimi: ${sp.prodCost} Para / ${simSecToRealSec(sp.prodSec)} sn`,
           );
           const edgeCls = unlocked ? 'edge-unlocked' : isResearching ? 'edge-active' : '';
           const edgeHtml = idx > 0 ? `<div class="tech-edge ${edgeCls}"></div>` : '';
@@ -1911,7 +1913,7 @@ export class GameUIController {
               ? `${sp.researchCost} 💰 (⏳)`
               : `${sp.researchCost} 💰`;
           const tip = escapeAttr(
-            `T${sp.tier} ${sp.name}\nKoruma: ${sp.defense}\nAraştırma: ${sp.researchCost} Para / ${sp.researchSec} sn\nFabrika Üretimi: ${sp.prodCost} Para / ${sp.prodSec} sn`,
+            `T${sp.tier} ${sp.name}\nKoruma: ${sp.defense}\nAraştırma: ${sp.researchCost} Para / ${simSecToRealSec(sp.researchSec)} sn\nFabrika Üretimi: ${sp.prodCost} Para / ${simSecToRealSec(sp.prodSec)} sn`,
           );
           const edgeCls = unlocked ? 'edge-unlocked' : isResearching ? 'edge-active' : '';
           const edgeHtml = idx > 0 ? `<div class="tech-edge ${edgeCls}"></div>` : '';
@@ -2022,7 +2024,7 @@ export class GameUIController {
               <div class="divided-item">
                 <div class="card-row">
                   <span>❤️ Bu Hastanenin Katkısı:</span>
-                  <b>+%${ECONOMY.HOSPITAL_HEALTH_BONUS_PCT} Ülke Sağlığı | +${ECONOMY.HOSPITAL_MANPOWER_PER_SEC} Manpower/sn</b>
+                  <b>+%${ECONOMY.HOSPITAL_HEALTH_BONUS_PCT} Ülke Sağlığı | +${ECONOMY.HOSPITAL_MANPOWER_PER_SEC} Manpower/3sn</b>
                 </div>
               </div>
               <div class="divided-item">
@@ -2165,8 +2167,18 @@ export class GameUIController {
 
         host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
         const soldierInp = host.querySelector('#barracks-soldier-qty') as HTMLInputElement | null;
+        soldierInp?.addEventListener('input', () => {
+          this.callbacks.onModalInteraction?.();
+        });
         host.querySelector('#btn-barracks-max-soldiers')?.addEventListener('click', () => {
           if (soldierInp) soldierInp.value = String(Math.floor(p.manpower));
+          this.callbacks.onModalInteraction?.();
+        });
+
+        host.querySelectorAll<HTMLInputElement>('.barracks-eq-input').forEach((inp) => {
+          inp.addEventListener('input', () => {
+            this.callbacks.onModalInteraction?.();
+          });
         });
 
         host.querySelectorAll<HTMLButtonElement>('[data-bar-bump]').forEach((btn) => {
@@ -2181,6 +2193,7 @@ export class GameUIController {
             if (!inp) return;
             const stock = Number(inp.dataset.stock || 0);
             inp.value = String(Math.min(stock, Math.max(0, Number(inp.value || 0)) + add));
+            this.callbacks.onModalInteraction?.();
           });
         });
 
@@ -2194,6 +2207,7 @@ export class GameUIController {
             const inp = host.querySelector<HTMLInputElement>(sel);
             if (!inp) return;
             inp.value = String(Number(inp.dataset.stock || 0));
+            this.callbacks.onModalInteraction?.();
           });
         });
 
@@ -2239,7 +2253,7 @@ export class GameUIController {
               const wSp = isW ? WEAPONS[id as WeaponId] : null;
               const sSp = !isW ? SHIELDS[id as Exclude<ShieldId, 'none'>] : null;
               const cost = wSp ? wSp.prodCost : sSp!.prodCost;
-              const sec = wSp ? wSp.prodSec : sSp!.prodSec;
+              const sec = simSecToRealSec(wSp ? wSp.prodSec : sSp!.prodSec);
               const stock = isW
                 ? p.weaponsStock[id as WeaponId]
                 : p.shieldsStock[id as Exclude<ShieldId, 'none'>];
@@ -2344,6 +2358,7 @@ export class GameUIController {
             el.textContent = `${total} 💰`;
             (el as HTMLElement).style.color = total > p.money ? '#f87171' : '#fde047';
           }
+          this.callbacks.onModalInteraction?.();
         };
 
         host.querySelector('.close-win')?.addEventListener('click', () => this.openWindow(null, false));
@@ -2404,6 +2419,7 @@ export class GameUIController {
           this.lastErrorMsg = '';
           this.renderModal();
           this.updateLiveHUD();
+          this.callbacks.onModalInteraction?.();
         });
 
         this.bindDemolishButton(host, pid, reg);
@@ -2727,7 +2743,7 @@ export class GameUIController {
                   <button class="pixel-btn" id="btn-dip-nap" ${edge.status === 'war' || napActive ? 'disabled' : ''}>🛡️ Saldırmazlık Paktı</button>
                 </div>
                 <div class="divided-item card-row">
-                  <span><b>7. 💰 Ticaret Anlaşması</b> — İki tarafa da her 5 sn'de <b>+%10 ek gelir</b> sağlar (savaşta iptal olur).</span>
+                  <span><b>7. 💰 Ticaret Anlaşması</b> — İki tarafa da her 15 sn'de <b>+%10 ek gelir</b> sağlar (savaşta iptal olur).</span>
                   <button class="pixel-btn" id="btn-dip-trade" ${edge.status === 'war' || edge.tradeAgreement ? 'disabled' : ''}>💰 Ticaret Anlaşması</button>
                 </div>
               </div>

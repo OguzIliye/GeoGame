@@ -1,10 +1,16 @@
 import type { BuildingType, ShieldId, WeaponId } from '../types';
 
+export const SIM_TIME_SCALE = 1 / 3;
+
+export function simSecToRealSec(simSec: number): number {
+  return Math.round(simSec / SIM_TIME_SCALE);
+}
+
 export const CALENDAR = {
   START_YEAR: 2000,
   END_YEAR: 2010,
-  TOTAL_DAYS: 10 * 365, // 3650 days -> ~4 hours at 1x (0.25 days/sec)
-  DAYS_PER_SIM_SECOND: 0.25, // 1 real second = 0.25 in-game days (4 sec = 1 day)
+  TOTAL_DAYS: 10 * 365,
+  DAYS_PER_SIM_SECOND: 0.25,
 } as const;
 
 export const ARENA_CONFIG = {
@@ -74,7 +80,7 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
     cost: 150,
     buildSec: 6,
     alwaysActive: false,
-    description: '+%15 sağlık (+2 manpower/s) sağlar; savaştan kaçan yaralıları iyileştirir.',
+    description: '+%15 sağlık (+2 manpower/3sn) sağlar; savaştan kaçan yaralıları iyileştirir.',
   },
   bank: {
     id: 'bank',
@@ -82,7 +88,7 @@ export const BUILDINGS: Record<BuildingType, BuildingSpec> = {
     cost: 100,
     buildSec: 6,
     alwaysActive: true,
-    description: 'Sürekli çalışır, her 5 sn\'de +60 para üretir ve kredi sağlar.',
+    description: 'Sürekli çalışır, her 15 sn\'de +60 para üretir ve kredi sağlar.',
   },
   factory: {
     id: 'factory',

@@ -58,9 +58,9 @@ describe('Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu', () => {
     const state = structuredClone(baseTurkeyState);
     const rng = createRng('phase4_ai_seed');
 
-    // 90 simülasyon saniyesi (22.5 oyun günü) çalıştır -> 3. günden sonra AI ülkeler Banka->Fabrika->Kışla kurup ekipman üreterek ordu çıkarmalı
+    // 90 simülasyon saniyesi (270 gerçek sn = 22.5 oyun günü) çalıştır -> 3. günden sonra AI ülkeler Banka->Fabrika->Kışla kurup ekipman üreterek ordu çıkarmalı
     for (let t = 0; t < 90; t++) {
-      const dt = advanceClock(state, 1);
+      const dt = advanceClock(state, 3);
       tickEconomyAndQueues(state, dt);
       tickAICountries(state, dt, rng);
       tickArmiesCombatAndShips(state, dt);
@@ -82,8 +82,8 @@ describe('Faz 4 — Diplomasi, İnsan Gibi AI & Oyun Sonu', () => {
     const state = structuredClone(baseTurkeyState);
     const pid = turkeyFeature.id;
 
-    // 1. 2010 (~4 saat) bitiş tarihi -> stat karşılaştırması
-    advanceClock(state, 15000); // 3750 gün -> 3650 tavanı
+    // 1. 2010 bitiş tarihi -> stat karşılaştırması
+    advanceClock(state, 45000); // 3750 gün -> 3650 tavanı
     checkEndGameConditions(state);
     expect(state.phase).toBe('ended');
     expect(state.endReason).toBe('date_reached');

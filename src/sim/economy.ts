@@ -952,11 +952,11 @@ export function tickEconomyAndQueues(
   for (const country of Object.values(state.countries)) {
     if (country.eliminated) continue;
 
-    country.manpower += getCountryManpowerPerSec(state, country.id) * dtSimSec;
+    country.manpower += getCountryManpowerPerSec(state, country.id) * workDt;
 
-    country.incomeTickAccSec = (country.incomeTickAccSec ?? 0) + dtSimSec;
-    while (country.incomeTickAccSec >= ECONOMY.INCOME_TICK_SEC) {
-      country.incomeTickAccSec -= ECONOMY.INCOME_TICK_SEC;
+    country.incomeTickAccSec = (country.incomeTickAccSec ?? 0) + workDt;
+    while (country.incomeTickAccSec + 1e-9 >= ECONOMY.INCOME_TICK_SEC) {
+      country.incomeTickAccSec = Math.max(0, country.incomeTickAccSec - ECONOMY.INCOME_TICK_SEC);
       const gross = getCountryGrossIncomePerTick(state, country.id);
       let net = gross;
       if (country.debt > 0) {

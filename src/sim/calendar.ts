@@ -1,4 +1,4 @@
-import { CALENDAR } from '../config/balance';
+import { CALENDAR, SIM_TIME_SCALE } from '../config/balance';
 import type { AutoPauseReason, GameState, SpeedMultiplier } from '../types';
 
 const MONTHS_TR = [
@@ -80,7 +80,7 @@ export function isEffectivelyPaused(state: GameState): boolean {
 /** Advance simulation clock by real-time delta, returning effective simulation seconds elapsed. */
 export function advanceClock(state: GameState, dtRealSec: number): number {
   if (state.phase !== 'playing' || isEffectivelyPaused(state)) return 0;
-  const dtSimSec = dtRealSec * state.speed;
+  const dtSimSec = dtRealSec * state.speed * SIM_TIME_SCALE;
   state.simSecondsElapsed += dtSimSec;
   state.simDaysElapsed = Math.min(
     CALENDAR.TOTAL_DAYS,

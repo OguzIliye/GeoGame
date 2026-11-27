@@ -28,9 +28,9 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2000');
 
     setGameSpeed(state, 2);
-    const simDt = advanceClock(state, 2);
-    expect(simDt).toBe(4);
-    expect(state.simDaysElapsed).toBe(1); // 4 sim sec * 0.25 day/sec = 1 in-game day
+    const simDt = advanceClock(state, 6);
+    expect(simDt).toBeCloseTo(4, 5);
+    expect(state.simDaysElapsed).toBeCloseTo(1, 5); // 4 sim sec * 0.25 day/sec = 1 in-game day
 
     togglePauseSpace(state);
     expect(state.speed).toBe(0);
@@ -39,7 +39,7 @@ describe('Faz 2 — Zaman, Ekonomi, Binalar & Teknoloji', () => {
     togglePauseSpace(state);
     expect(state.speed).toBe(2);
 
-    advanceClock(state, 10000);
+    advanceClock(state, 30000);
     expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2010');
   });
 

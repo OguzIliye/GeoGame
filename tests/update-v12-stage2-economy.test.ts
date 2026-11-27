@@ -213,9 +213,9 @@ describe('v1.2 Aşama 2 — 100💰 Başlangıç, Tek Üniversite, 5 sn Gelir, B
     expect(AI_CONFIG.STARTUP_DELAY_DAYS).toBe(3);
     expect(AI_CONFIG.PEACEFUL_DEV_UNTIL_DAYS).toBe(7);
 
-    // İlk 11 sn = 2.75 oyun günü (< 3 gün): AI'lar tek bir bina dahi kurmamış olmalı (sadece başlangıçtaki 1 Üniversite)
+    // İlk 11 sim sn (33 gerçek sn) = 2.75 oyun günü (< 3 gün): AI'lar tek bir bina dahi kurmamış olmalı (sadece başlangıçtaki 1 Üniversite)
     for (let s = 0; s < 11; s++) {
-      const dt = advanceClock(state, 1);
+      const dt = advanceClock(state, 3);
       tickEconomyAndQueues(state, dt);
       tickAICountries(state, dt, rng);
     }
@@ -225,9 +225,9 @@ describe('v1.2 Aşama 2 — 100💰 Başlangıç, Tek Üniversite, 5 sn Gelir, B
       expect(bCount).toBe(1);
     }
 
-    // 11..27 sn = 2.75..6.75 oyun günü (< 7 gün): AI'lar bina kurmaya başlar ama HİÇBİR savaş ilanı olmaz!
+    // 11..27 sim sn = 2.75..6.75 oyun günü (< 7 gün): AI'lar bina kurmaya başlar ama HİÇBİR savaş ilanı olmaz!
     for (let s = 11; s < 27; s++) {
-      const dt = advanceClock(state, 1);
+      const dt = advanceClock(state, 3);
       tickEconomyAndQueues(state, dt);
       tickAICountries(state, dt, rng);
     }

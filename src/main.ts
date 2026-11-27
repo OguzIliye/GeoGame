@@ -238,6 +238,9 @@ async function bootstrap(): Promise<void> {
         resetToWorldSelect(true);
       }
     },
+    onModalInteraction: () => {
+      tutorial?.syncFrame();
+    },
   });
 
   tutorial = new SpotlightTutorialController(state, camera, ui, {
@@ -851,7 +854,7 @@ async function bootstrap(): Promise<void> {
       if (!tutActive) {
         tickAICountries(state, dtSimSec);
       }
-      tickArmiesCombatAndShips(state, dtSimSec, speedMult);
+      tickArmiesCombatAndShips(state, dtSimSec * speedMult, 1);
       checkEndGameConditions(state);
     }
 

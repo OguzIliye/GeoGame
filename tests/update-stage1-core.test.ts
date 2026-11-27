@@ -34,13 +34,13 @@ describe('v1.1 Aşama 1 — Takvim (0.25 gün/sn, 4 Saat), Auto-Pause, Manuel Bi
     expect(CALENDAR.DAYS_PER_SIM_SECOND).toBe(0.25);
     expect(CALENDAR.TOTAL_DAYS).toBe(3650);
 
-    // 4 gerçek saniye = tam 1 oyun günü
-    advanceClock(state, 4);
-    expect(state.simDaysElapsed).toBe(1);
+    // SIM_TIME_SCALE = 1/3 -> 12 gerçek saniye = tam 1 oyun günü
+    advanceClock(state, 12);
+    expect(state.simDaysElapsed).toBeCloseTo(1, 5);
     expect(formatSimDate(state.simDaysElapsed)).toBe('2 Oca 2000');
 
-    // ~4 saat (14600 sn) sonunda 1 Ocak 2010'a ulaşır
-    advanceClock(state, 14596);
+    // ~12 saat (43800 sn) sonunda 1 Ocak 2010'a ulaşır
+    advanceClock(state, 43788);
     expect(formatSimDate(state.simDaysElapsed)).toBe('1 Oca 2010');
   });
 
@@ -57,7 +57,7 @@ describe('v1.1 Aşama 1 — Takvim (0.25 gün/sn, 4 Saat), Auto-Pause, Manuel Bi
     // Eylem biter -> otomatik olarak 2x hızdan devam eder
     setAutoPauseReason(state, 'building_placement', false);
     expect(isAutoPaused(state)).toBe(false);
-    expect(advanceClock(state, 2)).toBe(4);
+    expect(advanceClock(state, 6)).toBeCloseTo(4, 5);
 
     // Oyuncu önceden Space ile manuel durdurmuşsa, eylem bitince oyun duraklatılmış kalır
     togglePauseSpace(state);

@@ -594,6 +594,15 @@ export function renderRegionalTheater(
         camera.scale * 0.82,
       );
       drawRedCrossBadge(ctx, sx, sy - 14 * spriteStep - 4, spriteStep);
+      drawPixelTag(
+        ctx,
+        `🩹 ${wCount}`,
+        sx,
+        sy + Math.max(14, Math.round(10 * spriteStep + 6)),
+        '#fecaca',
+        'rgba(127, 29, 29, 0.92)',
+        '#f87171',
+      );
     }
   }
 
