@@ -264,14 +264,35 @@ export function orderArmyMergeIntoTarget(
     return { ok: m.ok, mergedImmediately: m.ok, targetArmyId: dst.id, error: m.error };
   }
 
+  const startReg =
+    state.regions[src.currentRegionId] ?? pickRegionAtPoint([src.x, src.y], state.regions);
+  const dstReg =
+    state.regions[dst.currentRegionId] ?? pickRegionAtPoint([dst.x, dst.y], state.regions);
+  const regionPath =
+    startReg && dstReg
+      ? findPassableRegionPath(state, src.countryId, startReg.id, dstReg.id)
+      : null;
+  if (!regionPath) {
+    return { ok: false, error: 'Bu birliğe karadan geçiş yok! Deniz üzerinden yürünemez.' };
+  }
+
   clearCaptureByArmy(state, src.id);
+  src.evacuatingHome = false;
   src.mergeTargetArmyId = dst.id;
   src.targetArmyId = null;
   src.targetRegionId = null;
   src.embarkingShipId = null;
-  src.waypoints = [[dst.x, dst.y]];
-  src.targetX = dst.x;
-  src.targetY = dst.y;
+  const wps: Point[] = segmentCrossesWaterOrForbidden(
+    state,
+    src.countryId,
+    [src.x, src.y],
+    [dst.x, dst.y],
+  )
+    ? [...regionPath.slice(1).map((r): Point => [r.centroid[0], r.centroid[1]]), [dst.x, dst.y]]
+    : [[dst.x, dst.y]];
+  src.waypoints = wps;
+  src.targetX = wps[0][0];
+  src.targetY = wps[0][1];
   return { ok: true, mergedImmediately: false, targetArmyId: dst.id };
 }
 
@@ -529,30 +550,68 @@ export function buildNaturalMarchWaypoints(
       continue;
     }
 
-    pts.push([bx, by]);
+    const regMid = pickRegionAtPoint([bx, by], state.regions);
+    if (regMid && canArmyEnterCountryTerritory(state, countryId, regMid.ownerId)) {
+      pts.push([bx, by]);
+    }
   }
 
   pts.push([to[0], to[1]]);
   return pts;
 }
 
-function segmentCrossesForbiddenTerritory(
+function segmentCrossesWaterOrForbidden(
   state: GameState,
   countryId: string,
   from: Point,
   to: Point,
 ): boolean {
-  const samples = 10;
-  for (let i = 1; i <= samples; i++) {
+  const samples = 16;
+  for (let i = 1; i < samples; i++) {
     const t = i / samples;
     const px = from[0] + (to[0] - from[0]) * t;
     const py = from[1] + (to[1] - from[1]) * t;
     const hit = pickRegionAtPoint([px, py], state.regions);
-    if (hit && !canArmyEnterCountryTerritory(state, countryId, hit.ownerId)) {
+    if (!hit || !canArmyEnterCountryTerritory(state, countryId, hit.ownerId)) {
       return true;
     }
   }
   return false;
+}
+
+function findLandRegionPathIgnoringDiplomacy(
+  state: GameState,
+  startRegionId: string,
+  targetRegionId: string,
+): Region[] | null {
+  const startReg = state.regions[startRegionId];
+  const targetReg = state.regions[targetRegionId];
+  if (!startReg || !targetReg) return null;
+  if (startRegionId === targetRegionId) return [targetReg];
+
+  const queue: string[] = [startRegionId];
+  const prev = new Map<string, string | null>([[startRegionId, null]]);
+  while (queue.length > 0) {
+    const curId = queue.shift()!;
+    if (curId === targetRegionId) {
+      const path: Region[] = [];
+      let trace: string | null = targetRegionId;
+      while (trace !== null) {
+        path.push(state.regions[trace]);
+        trace = prev.get(trace) ?? null;
+      }
+      path.reverse();
+      return path;
+    }
+    const cur = state.regions[curId];
+    if (!cur) continue;
+    for (const nbId of cur.neighbors) {
+      if (prev.has(nbId) || !state.regions[nbId]) continue;
+      prev.set(nbId, curId);
+      queue.push(nbId);
+    }
+  }
+  return null;
 }
 
 export function findPassableRegionPath(
@@ -612,7 +671,17 @@ export function orderArmyMoveToRegion(
     };
   }
 
-  const dest: Point = destPoint ? [destPoint[0], destPoint[1]] : [reg.centroid[0], reg.centroid[1]];
+  const rawDest: Point = destPoint
+    ? [destPoint[0], destPoint[1]]
+    : [reg.centroid[0], reg.centroid[1]];
+  const destHit = pickRegionAtPoint(rawDest, state.regions);
+  const dest: Point =
+    destHit && canArmyEnterCountryTerritory(state, army.countryId, destHit.ownerId)
+      ? rawDest
+      : [reg.centroid[0], reg.centroid[1]];
+
+  const startReg =
+    state.regions[army.currentRegionId] ?? pickRegionAtPoint([army.x, army.y], state.regions);
   const curReg = state.regions[army.currentRegionId];
   const startingOnForbidden =
     Boolean(army.evacuatingHome) ||
@@ -620,31 +689,55 @@ export function orderArmyMoveToRegion(
   let wps: Point[];
 
   if (startingOnForbidden && reg.ownerId === army.countryId) {
-    wps = [dest];
+    const landPath = startReg
+      ? findLandRegionPathIgnoringDiplomacy(state, startReg.id, reg.id)
+      : null;
+    if (!landPath) {
+      return {
+        ok: false,
+        error: 'Bu bölgeye karadan geçiş yok! Deniz aşırı hedefler için Liman gemisi kullanın.',
+      };
+    }
+    wps = landPath.slice(1, -1).map((r): Point => [r.centroid[0], r.centroid[1]]);
+    wps.push(dest);
     army.evacuatingHome = true;
-  } else if (segmentCrossesForbiddenTerritory(state, army.countryId, [army.x, army.y], dest)) {
-    const startReg =
-      state.regions[army.currentRegionId] ?? pickRegionAtPoint([army.x, army.y], state.regions);
+  } else {
     const regionPath = startReg
       ? findPassableRegionPath(state, army.countryId, startReg.id, reg.id)
       : null;
     if (!regionPath) {
       return {
         ok: false,
-        error: 'Bu ülkenin topraklarına giriş izniniz yok.',
+        error: 'Bu bölgeye karadan geçiş yok! Deniz aşırı hedefler için Liman gemisi kullanın.',
       };
     }
-    wps = regionPath.slice(1, -1).map((r): Point => [r.centroid[0], r.centroid[1]]);
-    wps.push(dest);
-    army.evacuatingHome = false;
-  } else {
-    wps = buildNaturalMarchWaypoints(
-      state,
-      army.countryId,
-      [army.x, army.y],
-      dest,
-      `${army.id}_${targetRegionId}`,
-    );
+    if (segmentCrossesWaterOrForbidden(state, army.countryId, [army.x, army.y], dest)) {
+      wps = regionPath.slice(1, -1).map((r): Point => [r.centroid[0], r.centroid[1]]);
+      if (
+        wps.length === 0 &&
+        startReg &&
+        Math.hypot(army.x - startReg.centroid[0], army.y - startReg.centroid[1]) > 0.05
+      ) {
+        wps.push([startReg.centroid[0], startReg.centroid[1]]);
+      }
+      wps.push(dest);
+    } else {
+      wps = buildNaturalMarchWaypoints(
+        state,
+        army.countryId,
+        [army.x, army.y],
+        dest,
+        `${army.id}_${targetRegionId}`,
+      );
+      if (
+        wps.length === 1 &&
+        Math.hypot(dest[0] - army.x, dest[1] - army.y) >= COMBAT_CONFIG.LONG_MARCH_WEAVE_MIN_DIST &&
+        regionPath.length >= 2
+      ) {
+        const mid = regionPath[Math.floor(regionPath.length / 2)];
+        wps = [[mid.centroid[0], mid.centroid[1]], dest];
+      }
+    }
     army.evacuatingHome = false;
   }
 
@@ -712,12 +805,36 @@ export function orderArmyAttackEnemyArmy(
     return { ok: false, error: 'Bu ülkeyle savaşta değilsiniz! Önce savaş ilan edin.' };
   }
 
+  const startReg =
+    state.regions[army.currentRegionId] ?? pickRegionAtPoint([army.x, army.y], state.regions);
+  const enemyReg =
+    state.regions[enemy.currentRegionId] ?? pickRegionAtPoint([enemy.x, enemy.y], state.regions);
+  const regionPath =
+    startReg && enemyReg
+      ? findPassableRegionPath(state, army.countryId, startReg.id, enemyReg.id)
+      : null;
+  if (!regionPath) {
+    return {
+      ok: false,
+      error: 'Hedef orduya karadan geçiş yok! Deniz aşırı hedefler için Liman gemisi kullanın.',
+    };
+  }
+
   clearCaptureByArmy(state, army.id);
+  army.evacuatingHome = false;
   army.targetArmyId = enemy.id;
   army.mergeTargetArmyId = null;
-  army.waypoints = [[enemy.x, enemy.y]];
-  army.targetX = enemy.x;
-  army.targetY = enemy.y;
+  const wps: Point[] = segmentCrossesWaterOrForbidden(
+    state,
+    army.countryId,
+    [army.x, army.y],
+    [enemy.x, enemy.y],
+  )
+    ? [...regionPath.slice(1).map((r): Point => [r.centroid[0], r.centroid[1]]), [enemy.x, enemy.y]]
+    : [[enemy.x, enemy.y]];
+  army.waypoints = wps;
+  army.targetX = wps[0][0];
+  army.targetY = wps[0][1];
   army.targetRegionId = enemy.currentRegionId;
   army.embarkingShipId = null;
   return { ok: true };
@@ -839,14 +956,32 @@ export function orderArmyEmbarkShip(
   if (army.countryId !== ship.countryId) return { ok: false, error: 'Bu gemi ülkenize ait değil.' };
   if (army.inCombatWithArmyId) return { ok: false, error: 'Savaştaki ordu gemiye binemez.' };
 
+  const startReg =
+    state.regions[army.currentRegionId] ?? pickRegionAtPoint([army.x, army.y], state.regions);
+  const coastReg = state.regions[ship.landingRegionId ?? ship.homeRegionId];
+  let wps: Point[] = [[ship.x, ship.y]];
+  if (startReg && coastReg && Math.hypot(army.x - ship.x, army.y - ship.y) > 1.2) {
+    const regionPath = findPassableRegionPath(state, army.countryId, startReg.id, coastReg.id);
+    if (!regionPath) {
+      return { ok: false, error: 'Gemiye karadan ulaşım yok!' };
+    }
+    if (segmentCrossesWaterOrForbidden(state, army.countryId, [army.x, army.y], [ship.x, ship.y])) {
+      wps = [
+        ...regionPath.slice(1).map((r): Point => [r.centroid[0], r.centroid[1]]),
+        [ship.x, ship.y],
+      ];
+    }
+  }
+
   clearCaptureByArmy(state, army.id);
+  army.evacuatingHome = false;
   army.embarkingShipId = ship.id;
   army.targetArmyId = null;
   army.mergeTargetArmyId = null;
   army.targetRegionId = null;
-  army.waypoints = [[ship.x, ship.y]];
-  army.targetX = ship.x;
-  army.targetY = ship.y;
+  army.waypoints = wps;
+  army.targetX = wps[0][0];
+  army.targetY = wps[0][1];
   return { ok: true };
 }
 
@@ -1537,9 +1672,39 @@ export function tickArmiesCombatAndShips(
         mergeArmies(state, mergeTarget.id, army.id);
         continue;
       } else {
-        army.targetX = mergeTarget.x;
-        army.targetY = mergeTarget.y;
-        army.waypoints = [[mergeTarget.x, mergeTarget.y]];
+        if (
+          segmentCrossesWaterOrForbidden(
+            state,
+            army.countryId,
+            [army.x, army.y],
+            [mergeTarget.x, mergeTarget.y],
+          )
+        ) {
+          const path = findPassableRegionPath(
+            state,
+            army.countryId,
+            army.currentRegionId,
+            mergeTarget.currentRegionId,
+          );
+          if (!path) {
+            army.mergeTargetArmyId = null;
+            army.targetX = null;
+            army.targetY = null;
+            army.waypoints = [];
+          } else {
+            const wps: Point[] = [
+              ...path.slice(1).map((r): Point => [r.centroid[0], r.centroid[1]]),
+              [mergeTarget.x, mergeTarget.y],
+            ];
+            army.waypoints = wps;
+            army.targetX = wps[0][0];
+            army.targetY = wps[0][1];
+          }
+        } else {
+          army.targetX = mergeTarget.x;
+          army.targetY = mergeTarget.y;
+          army.waypoints = [[mergeTarget.x, mergeTarget.y]];
+        }
       }
     }
 
@@ -1551,6 +1716,29 @@ export function tickArmiesCombatAndShips(
         army.targetY = null;
         army.waypoints = [];
         army.evacuatingHome = false;
+      } else if (
+        segmentCrossesWaterOrForbidden(state, army.countryId, [army.x, army.y], [foe.x, foe.y])
+      ) {
+        const path = findPassableRegionPath(
+          state,
+          army.countryId,
+          army.currentRegionId,
+          foe.currentRegionId,
+        );
+        if (!path) {
+          army.targetArmyId = null;
+          army.targetX = null;
+          army.targetY = null;
+          army.waypoints = [];
+        } else {
+          const wps: Point[] = [
+            ...path.slice(1).map((r): Point => [r.centroid[0], r.centroid[1]]),
+            [foe.x, foe.y],
+          ];
+          army.waypoints = wps;
+          army.targetX = wps[0][0];
+          army.targetY = wps[0][1];
+        }
       } else {
         army.targetX = foe.x;
         army.targetY = foe.y;
@@ -1566,10 +1754,14 @@ export function tickArmiesCombatAndShips(
         army.targetY = null;
         army.waypoints = [];
         army.evacuatingHome = false;
-      } else {
+      } else if (!army.waypoints || army.waypoints.length <= 1) {
         army.targetX = ship.x;
         army.targetY = ship.y;
         army.waypoints = [[ship.x, ship.y]];
+      } else {
+        army.waypoints[army.waypoints.length - 1] = [ship.x, ship.y];
+        army.targetX = army.waypoints[0][0];
+        army.targetY = army.waypoints[0][1];
       }
     }
 
@@ -1585,13 +1777,7 @@ export function tickArmiesCombatAndShips(
           army.waypoints.shift();
         }
 
-        if (
-          army.waypoints &&
-          army.waypoints.length > 0 &&
-          !army.embarkingShipId &&
-          !army.targetArmyId &&
-          !army.mergeTargetArmyId
-        ) {
+        if (army.waypoints && army.waypoints.length > 0) {
           army.targetX = army.waypoints[0][0];
           army.targetY = army.waypoints[0][1];
           const underMid = pickRegionAtPoint([army.x, army.y], state.regions);
@@ -1643,6 +1829,24 @@ export function tickArmiesCombatAndShips(
         const nextX = army.x + (dx / dist) * step;
         const nextY = army.y + (dy / dist) * step;
         const under = pickRegionAtPoint([nextX, nextY], state.regions);
+        if (!under) {
+          const ship = army.embarkingShipId ? state.ships[army.embarkingShipId] : null;
+          const boardingCoastalShip =
+            Boolean(ship) && Math.hypot(ship!.x - nextX, ship!.y - nextY) <= 0.8;
+          const curReg = state.regions[army.currentRegionId];
+          const wpReg = pickRegionAtPoint([army.targetX, army.targetY], state.regions);
+          const crossingNarrowNeighborInlet =
+            Boolean(curReg && wpReg) &&
+            (curReg.id === wpReg!.id || curReg.neighbors.includes(wpReg!.id));
+          if (!boardingCoastalShip && !crossingNarrowNeighborInlet) {
+            army.targetX = null;
+            army.targetY = null;
+            army.waypoints = [];
+            army.targetRegionId = null;
+            army.evacuatingHome = false;
+            continue;
+          }
+        }
         if (
           under &&
           under.id !== army.currentRegionId &&

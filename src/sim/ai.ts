@@ -474,15 +474,28 @@ function runAIMilitaryTactics(
       }
     }
 
-    // Prioritize enemy regions WITH buildings (strategic targets!) or closest border regions
+    // Prioritize enemy regions WITH buildings (strategic targets!) or closest border regions that are land-reachable
     const scoredTargets = enemyRegions.map((er) => {
       const dist = Math.hypot(er.centroid[0] - army.x, er.centroid[1] - army.y);
       const buildingBonus = er.building ? -2.8 : 0;
       return { reg: er, score: dist + buildingBonus };
     });
     scoredTargets.sort((a, b) => a.score - b.score);
-    if (scoredTargets[0]) {
-      orderArmyMoveToRegion(state, army.id, scoredTargets[0].reg.id);
+    let movedByLand = false;
+    for (const cand of scoredTargets) {
+      if (orderArmyMoveToRegion(state, army.id, cand.reg.id).ok) {
+        movedByLand = true;
+        break;
+      }
+    }
+    if (!movedByLand) {
+      const myShip = Object.values(state.ships).find(
+        (s) => s.countryId === ai.id && s.targetX === null,
+      );
+      const coastalTarget = enemyRegions.find((r) => r.isCoastal && r.coastalAnchor);
+      if (myShip && coastalTarget) {
+        orderArmyEmbarkShip(state, army.id, myShip.id);
+      }
     }
   }
 }

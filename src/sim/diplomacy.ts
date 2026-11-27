@@ -76,7 +76,38 @@ export function canArmyEnterCountryTerritory(
   return rel === 'war' || rel === 'allied';
 }
 
-/** Send any armies standing in (or marching toward) non-war, non-allied foreign territory back to their nearest own region. */
+function findNearestLandHomePath(
+  state: GameState,
+  startRegionId: string,
+  countryId: string,
+): string[] | null {
+  if (!state.regions[startRegionId]) return null;
+  const queue: string[] = [startRegionId];
+  const prev = new Map<string, string | null>([[startRegionId, null]]);
+  while (queue.length > 0) {
+    const curId = queue.shift()!;
+    const cur = state.regions[curId];
+    if (!cur) continue;
+    if (cur.ownerId === countryId) {
+      const path: string[] = [];
+      let trace: string | null = curId;
+      while (trace !== null) {
+        path.push(trace);
+        trace = prev.get(trace) ?? null;
+      }
+      path.reverse();
+      return path;
+    }
+    for (const nbId of cur.neighbors) {
+      if (prev.has(nbId) || !state.regions[nbId]) continue;
+      prev.set(nbId, curId);
+      queue.push(nbId);
+    }
+  }
+  return null;
+}
+
+/** Send any armies standing in (or marching toward) non-war, non-allied foreign territory back to their nearest land-reachable own region. */
 export function evacuateStrandedArmies(state: GameState): void {
   for (const army of Object.values(state.armies)) {
     const curReg = state.regions[army.currentRegionId];
@@ -106,19 +137,33 @@ export function evacuateStrandedArmies(state: GameState): void {
       continue;
     }
 
-    const owned = getCountryRegions(state, army.countryId);
-    if (owned.length === 0) continue;
-    owned.sort(
-      (a, b) =>
-        Math.hypot(a.centroid[0] - army.x, a.centroid[1] - army.y) -
-        Math.hypot(b.centroid[0] - army.x, b.centroid[1] - army.y),
-    );
-    const home = owned[0];
+    const landPath = curReg ? findNearestLandHomePath(state, curReg.id, army.countryId) : null;
+    if (!landPath || landPath.length === 0) {
+      // Stranded on an island with no land bridge home — stay put instead of walking on water
+      army.evacuatingHome = false;
+      army.targetRegionId = null;
+      army.targetX = null;
+      army.targetY = null;
+      army.waypoints = [];
+      continue;
+    }
+
+    const wps = landPath
+      .slice(1)
+      .map((id): [number, number] => [
+        state.regions[id].centroid[0],
+        state.regions[id].centroid[1],
+      ]);
+    const homeId = landPath[landPath.length - 1];
+    const home = state.regions[homeId];
+    if (wps.length === 0) {
+      wps.push([home.centroid[0], home.centroid[1]]);
+    }
     army.evacuatingHome = true;
     army.targetRegionId = home.id;
-    army.waypoints = [[home.centroid[0], home.centroid[1]]];
-    army.targetX = home.centroid[0];
-    army.targetY = home.centroid[1];
+    army.waypoints = wps;
+    army.targetX = wps[0][0];
+    army.targetY = wps[0][1];
   }
 }
 

@@ -110,6 +110,38 @@ describe('Sadece Savaş/Müttefik Toprak Geçişi, İttifak Sonrası Geri Dönü
     expect(hasTransitPact(state, pid, neighborId)).toBe(false);
     expect(canArmyEnterCountryTerritory(state, pid, neighborId)).toBe(false);
     expect(myArmy.evacuatingHome).toBe(true);
+
+    // 6. Deniz üzerinden yürüme engeli: kara bağlantısı olmayan (veya arada nötr ülke/deniz olan) bölgeye yürüyerek gidilemez!
+    const isolatedSeaReg = Object.values(state.regions).find((r) => {
+      if (r.ownerId === pid) return false;
+      // Hedef ülkeyle savaşta olsak bile karadan geçilebilir komşu zinciri olmayan bir bölge bul (örn. Mısır/İtalya/Kırım)
+      return !r.neighbors.some((nb) => state.regions[nb]?.ownerId === pid);
+    });
+    if (isolatedSeaReg) {
+      // Tüm komşularını geçici kopararak saf ada / deniz aşırı bölge simüle et
+      const savedNeighbors = [...isolatedSeaReg.neighbors];
+      isolatedSeaReg.neighbors = [];
+      for (const nbId of savedNeighbors) {
+        if (state.regions[nbId]) {
+          state.regions[nbId].neighbors = state.regions[nbId].neighbors.filter(
+            (x) => x !== isolatedSeaReg.id,
+          );
+        }
+      }
+      declareWar(state, pid, isolatedSeaReg.ownerId);
+      const landArmy = spawnUnitsIntoCountryBarracks(state, pid, 'sword:wood', 8)!;
+      const seaMove = orderArmyMoveToRegion(state, landArmy.id, isolatedSeaReg.id);
+      expect(seaMove.ok).toBe(false);
+
+      // Zorla denize doğru hedef verilse bile step-guard denize adım atmasını anında durdurur!
+      landArmy.x = -170;
+      landArmy.y = -80;
+      landArmy.targetX = -165;
+      landArmy.targetY = -75;
+      landArmy.waypoints = [[-165, -75]];
+      tickArmiesCombatAndShips(state, 0.5);
+      expect(landArmy.targetX).toBeNull();
+    }
   });
 
   it('müttefik ülke askerleriyle hiçbir şekilde savaşa, encounter a veya tıklama hedeflemesine girmez; belli miktar ayırma ve AI savaş popup çalışır', () => {
