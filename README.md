@@ -2,6 +2,8 @@
 
 🎮 **Oyunu Tarayıcıda Oyna:** https://oguziliye.github.io/GeoGame/
 
+**Uyarı:** Oyun mobil uyumlu değildir. Bilgisayar için tasarlanmıştır.
+
 **Pixel World**, gerçek dünya haritası üzerinde poligon bölgelerle oynanan, pixel art tarzında gerçek zamanlı bir **bölgesel strateji** oyunudur. Dünya haritasından bir ülke seçip **1 Ocak 2000 – 1 Ocak 2010** arasında ekonomini büyüt, teknoloji geliştir, ordularını kur ve 10 yılın sonunda en yüksek skora ulaş (veya tüm bölgeye hakim ol).
 
 ## Öne Çıkan Özellikler
