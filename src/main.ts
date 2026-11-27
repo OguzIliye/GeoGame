@@ -589,7 +589,7 @@ async function bootstrap(): Promise<void> {
         pt[1] < state.arena.minY ||
         pt[1] > state.arena.maxY)
     ) {
-      if (tutorial?.isActive) {
+      if (tutorial?.isActive && !tutorial.hidden) {
         tutorial.triggerWrongClickFlash();
         return;
       }
@@ -848,10 +848,10 @@ async function bootstrap(): Promise<void> {
 
     const dtSimSec = advanceClock(state, dtRealSec);
     if (dtSimSec > 0) {
-      const tutActive = Boolean(tutorial?.isActive);
-      const speedMult = tutActive ? 3 : 1;
+      const tutForeground = Boolean(tutorial?.isActive && !tutorial.hidden);
+      const speedMult = tutForeground ? 3 : 1;
       tickEconomyAndQueues(state, dtSimSec, speedMult);
-      if (!tutActive) {
+      if (!tutForeground) {
         tickAICountries(state, dtSimSec);
       }
       tickArmiesCombatAndShips(state, dtSimSec * speedMult, 1);

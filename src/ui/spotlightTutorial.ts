@@ -78,6 +78,8 @@ export class SpotlightTutorialController {
   rivalBorderRegionId: string | null = null;
   vanguardArmyId: string | null = null;
   wrongFlashCount = 0;
+  barracksSoldierCountChosen = false;
+  hidden = false;
 
   private state: GameState;
   private camera: MapCamera;
@@ -114,15 +116,40 @@ export class SpotlightTutorialController {
     this.state.tutorialHoldWoundedWithoutHospital = true;
     this.pickControlledRivalAndBorder(pid);
     this.vanguardArmyId = null;
+    this.barracksSoldierCountChosen = false;
+    this.hidden = false;
     this.initialRivalRegionOwnerChecked = false;
     this.lastFocusedStage = null;
     this.lastRenderedSig = '';
     this.setStage('1_goal');
   }
 
+  hide(): void {
+    if (!this.isActive || this.hidden) return;
+    this.hidden = true;
+    this.ui.closeButtonLockedByTutorial = false;
+    setAutoPauseReason(this.state, 'tutorial_spotlight', false);
+    if (this.state.speed === 0) {
+      setGameSpeed(this.state, 1);
+    }
+    this.lastRenderedSig = '';
+    this.syncFrame();
+  }
+
+  show(): void {
+    if (!this.isActive || !this.hidden) return;
+    this.hidden = false;
+    this.lastFocusedStage = null;
+    this.lastRenderedSig = '';
+    this.applyStageEntryEffects(this.stage);
+    this.syncFrame();
+  }
+
   skipOrStop(): void {
     this.stage = 'inactive';
     this.vanguardArmyId = null;
+    this.barracksSoldierCountChosen = false;
+    this.hidden = false;
     this.state.tutorialHoldWoundedWithoutHospital = false;
     this.ui.closeButtonLockedByTutorial = false;
     setAutoPauseReason(this.state, 'tutorial_spotlight', false);
@@ -208,6 +235,12 @@ export class SpotlightTutorialController {
     const pid = this.state.playerCountryId;
     if (!pid) return;
 
+    if (this.hidden) {
+      this.ui.closeButtonLockedByTutorial = false;
+      setAutoPauseReason(this.state, 'tutorial_spotlight', false);
+      return;
+    }
+
     const waiting = this.isWaitStage(st);
     setAutoPauseReason(this.state, 'tutorial_spotlight', !waiting && st !== 'inactive');
     if (waiting && this.state.speed === 0) {
@@ -252,11 +285,14 @@ export class SpotlightTutorialController {
         this.camera.focusOnPoint(x, y);
       }
     } else if (st === '4_click_barracks') {
+      this.barracksSoldierCountChosen = false;
       const br = this.findPlayerBuilding(pid, 'barracks');
       if (br) {
         const [x, y] = getRegionBuildingPoint(br);
         this.camera.focusOnPoint(x, y);
       }
+    } else if (st === '4_train_soldiers') {
+      this.barracksSoldierCountChosen = false;
     } else if (st === '5_click_army' || st === '6_click_army' || st === '8a_click_army' || st === '8b_click_army') {
       this.state.selectedArmyId = null;
       this.state.selectedArmyIds = [];
@@ -271,12 +307,15 @@ export class SpotlightTutorialController {
       const a = this.getPlayerArmies(pid)[0];
       if (a) this.camera.focusOnPoint(a.x, a.y);
     } else if (st === '5_move_border') {
+      if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false, true);
       const bReg = this.playerBorderRegionId ? this.state.regions[this.playerBorderRegionId] : null;
       if (bReg) this.camera.focusOnPoint(bReg.centroid[0], bReg.centroid[1]);
     } else if (st === '8a_intercept' && this.vanguardArmyId && this.state.armies[this.vanguardArmyId]) {
+      if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false, true);
       const v = this.state.armies[this.vanguardArmyId];
       this.camera.focusOnPoint(v.x, v.y);
     } else if (st === '8b_attack_region' && this.rivalBorderRegionId) {
+      if (this.ui.activeWindow === 'army') this.ui.openWindow(null, false, true);
       const rReg = this.state.regions[this.rivalBorderRegionId];
       if (rReg) this.camera.focusOnPoint(rReg.centroid[0], rReg.centroid[1]);
     }
@@ -439,17 +478,23 @@ export class SpotlightTutorialController {
           activeOrders
             .filter((o) => o.order.category === 'weapon')
             .reduce((s, o) => s + o.order.remainingCount, 0);
-        if (totalWeaponsPendingOrStock >= 4 && this.ui.activeWindow !== 'factory') {
+        const totalShieldsPendingOrStock =
+          p.shieldsStock.wood +
+          activeOrders
+            .filter((o) => o.order.category === 'shield')
+            .reduce((s, o) => s + o.order.remainingCount, 0);
+        const bothOrdered = totalWeaponsPendingOrStock >= 4 && totalShieldsPendingOrStock >= 4;
+        if (bothOrdered && this.ui.activeWindow !== 'factory') {
           this.setStage('3_wait_equip');
-        } else if (totalWeaponsPendingOrStock >= 4) {
-          // Unlock close button so player sees the per-item loading bars and can click ✕ or ▶ Devam
+        } else if (bothOrdered && !this.hidden) {
+          // Unlock close button so player sees the per-item loading bars and can click ✕ or ▶ Üretimi İzle
           this.ui.closeButtonLockedByTutorial = false;
         }
         break;
       }
       case '3_wait_equip': {
         const activeOrders = getCountryActiveProductionOrders(this.state, pid);
-        if (p.weaponsStock.sword >= 4 && activeOrders.length === 0) {
+        if (p.weaponsStock.sword >= 4 && p.shieldsStock.wood >= 4 && activeOrders.length === 0) {
           if (p.money < 200) p.money = 220;
           this.setStage('4_open_shop');
         }
@@ -685,6 +730,38 @@ export class SpotlightTutorialController {
     }
   }
 
+  private readDomInputNumber(selector: string): number {
+    if (typeof document === 'undefined') return 0;
+    const el = document.querySelector<HTMLInputElement>(selector);
+    if (!el) return 0;
+    const v = Number(el.value);
+    return Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+  }
+
+  private sumDomInputs(selector: string): number {
+    if (typeof document === 'undefined') return 0;
+    let sum = 0;
+    document.querySelectorAll<HTMLInputElement>(selector).forEach((el) => {
+      const v = Number(el.value);
+      if (Number.isFinite(v) && v > 0) sum += Math.floor(v);
+    });
+    return sum;
+  }
+
+  getStepCompactBadge(st: TutorialStageId = this.stage): string {
+    if (st === '1_goal') return 'Adım 1/11';
+    if (st.startsWith('2a_')) return 'Adım 2/11';
+    if (st.startsWith('2b_')) return 'Adım 3/11';
+    if (st.startsWith('3_')) return 'Adım 4/11';
+    if (st.startsWith('4_')) return 'Adım 5/11';
+    if (st.startsWith('5_')) return 'Adım 6/11';
+    if (st.startsWith('6_')) return 'Adım 7/11';
+    if (st.startsWith('7_')) return 'Adım 8/11';
+    if (st.startsWith('8')) return 'Adım 9/11';
+    if (st.startsWith('9_')) return 'Adım 10/11';
+    return 'Adım 11/11';
+  }
+
   private getTargetCenterAndInfo(
     pid: string,
     viewW: number,
@@ -696,6 +773,7 @@ export class SpotlightTutorialController {
     title: string;
     body: string;
     iconUri: string;
+    targetSelector?: string;
     showContinueBtn?: boolean;
     showFactoryProceedBtn?: boolean;
     isFinal?: boolean;
@@ -706,6 +784,14 @@ export class SpotlightTutorialController {
       if (typeof document === 'undefined') return null;
       const el = document.querySelector<HTMLElement>(sel);
       if (!el) return null;
+      const modal = el.closest?.('.modal-window') as HTMLElement | null;
+      if (modal && typeof el.scrollIntoView === 'function') {
+        const mr = modal.getBoundingClientRect();
+        const er = el.getBoundingClientRect();
+        if (mr.height > 0 && (er.top < mr.top + 8 || er.bottom > mr.bottom - 8)) {
+          el.scrollIntoView({ block: 'nearest' });
+        }
+      }
       const r = el.getBoundingClientRect();
       if (r.width <= 0 && r.height <= 0) return null;
       return [r.left + r.width * 0.5, r.top + r.height * 0.5];
@@ -739,13 +825,15 @@ export class SpotlightTutorialController {
       }
 
       case '2a_pick_bank': {
-        const pt = centerOfSelector('[data-shop-type="bank"]') ?? [viewW * 0.7, 250];
+        const sel = '[data-shop-type="bank"]';
+        const pt = centerOfSelector(sel) ?? [viewW * 0.7, 250];
         return {
           cx: pt[0],
           cy: pt[1],
+          targetSelector: sel,
           stepBadge: 'Adım 2 / 11',
           title: '🏦 Banka (100 💰) Seç',
-          body: 'Her Banka <code>5 sn</code>\'de bir <b>+60 💰</b> ek gelir basar ve kredi imkânı açar. <b>Banka — Haritaya Yerleştir (100💰)</b> butonuna tıklayın.',
+          body: 'Her Banka <code>15 sn</code>\'de bir <b>+60 💰</b> ek gelir basar ve kredi imkânı açar. <b>Banka — Haritaya Yerleştir (100💰)</b> butonuna tıklayın.',
           iconUri: getBuildingSpriteDataUri('bank', pColor),
         };
       }
@@ -777,13 +865,15 @@ export class SpotlightTutorialController {
       }
 
       case '2b_take_loan': {
-        const pt = centerOfSelector('#btn-loan-500') ?? [viewW * 0.4, 420];
+        const sel = '#btn-loan-500';
+        const pt = centerOfSelector(sel) ?? [viewW * 0.4, 420];
         return {
           cx: pt[0],
           cy: pt[1],
+          targetSelector: sel,
           stepBadge: 'Adım 3 / 11',
           title: '💳 İlk Sermaye: +500 💰 Borç Al',
-          body: 'Fabrika, Kışla ve ekipman üretimi için hızlı sermaye oluşturalım! <b>+500 💰 Borç Al</b> butonuna tıklayın (%15 faizle her 5 sn gelirinden otomatik ödenir).',
+          body: 'Fabrika, Kışla ve ekipman üretimi için hızlı sermaye oluşturalım! <b>+500 💰 Borç Al</b> butonuna tıklayın (%15 faizle her 15 sn gelirinden otomatik ödenir).',
           iconUri: getBuildingSpriteDataUri('bank', pColor),
         };
       }
@@ -845,22 +935,68 @@ export class SpotlightTutorialController {
           activeOrders
             .filter((o) => o.order.category === 'weapon')
             .reduce((s, o) => s + o.order.remainingCount, 0);
-        const alreadyOrdered = totalW >= 4;
-        const pt = alreadyOrdered
-          ? centerOfSelector('.close-win') ?? [viewW * 0.75, 110]
-          : centerOfSelector('#btn-factory-start') ?? [viewW * 0.72, 460];
+        const totalS =
+          (p?.shieldsStock.wood ?? 0) +
+          activeOrders
+            .filter((o) => o.order.category === 'shield')
+            .reduce((s, o) => s + o.order.remainingCount, 0);
+        const alreadyOrdered = totalW >= 4 && totalS >= 4;
+        if (alreadyOrdered) {
+          const sel = '.close-win';
+          const pt = centerOfSelector(sel) ?? [viewW * 0.75, 110];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            targetSelector: sel,
+            stepBadge: 'Adım 4 / 11',
+            title: '⏳ Paralel Hatlar Hazır — Kapat & İzle',
+            body: 'Harika! Satırlardaki ayrı loading bar\'ları gördünüz. Şimdi <b>✕</b> (veya aşağıdaki <b>▶ Üretimi İzle</b>) butonuna basarak üretimin tamamlanmasını izleyin.',
+            iconUri: getBuildingSpriteDataUri('factory', pColor),
+            showFactoryProceedBtn: true,
+          };
+        }
+
+        const inputW = this.sumDomInputs('.factory-eq-input[data-fac-cat="weapon"]');
+        const inputS = this.sumDomInputs('.factory-eq-input[data-fac-cat="shield"]');
+
+        if (totalW + inputW < 4) {
+          const sel = '[data-fac-bump="5"][data-fac-target="weapon:sword"]';
+          const pt = centerOfSelector(sel) ?? [viewW * 0.36, 340];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            targetSelector: sel,
+            stepBadge: 'Adım 4 / 11',
+            title: '⚔️ 1/3 — Kılıç Sayısını Arttır (+5)',
+            body: 'Önce sol sütundaki <b>Kılıç</b> satırında işaretli <b>+5</b> butonuna tıklayarak üretilecek silah adedini belirleyin.',
+            iconUri: getBuildingSpriteDataUri('factory', pColor),
+          };
+        }
+
+        if (totalS + inputS < 4) {
+          const sel = '[data-fac-bump="5"][data-fac-target="shield:wood"]';
+          const pt = centerOfSelector(sel) ?? [viewW * 0.74, 340];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            targetSelector: sel,
+            stepBadge: 'Adım 4 / 11',
+            title: '🛡️ 2/3 — Tahta Kalkan Seç (+5)',
+            body: 'Süper! Şimdi sağ sütundaki <b>Tahta Kalkan</b> satırında işaretli <b>+5</b> butonuna tıklayarak kalkan adedini belirleyin.',
+            iconUri: getBuildingSpriteDataUri('factory', pColor),
+          };
+        }
+
+        const sel = '#btn-factory-start';
+        const pt = centerOfSelector(sel) ?? [viewW * 0.76, 470];
         return {
           cx: pt[0],
           cy: pt[1],
+          targetSelector: sel,
           stepBadge: 'Adım 4 / 11',
-          title: alreadyOrdered
-            ? '⏳ Paralel Hatlar Hazır — Kapat & İzle'
-            : '⚔️🛡️ Silah & Kalkan Siparişi Ver',
-          body: alreadyOrdered
-            ? 'Harika! Satırlardaki ayrı loading bar\'ları gördünüz. Şimdi <b>✕</b> (veya aşağıdaki <b>▶ Üretimi İzle</b>) butonuna basarak üretimin tamamlanmasını izleyin.'
-            : 'Sol sütundaki <b>Kılıç</b> ve sağ sütundaki <b>Tahta Kalkan</b> ikonlarının yanından <code>+5</code> butonlarıyla en az <b>4 silah & kalkan</b> seçip <b>⚙️ Üretimi Başlat</b>\'a basın.',
+          title: '⚙️ 3/3 — Üretimi Başlat!',
+          body: 'Silah ve kalkan adetleri seçildi! Şimdi <b>⚙️ Üretimi Başlat</b> butonuna tıklayarak paralel hatları çalıştırın.',
           iconUri: getBuildingSpriteDataUri('factory', pColor),
-          showFactoryProceedBtn: alreadyOrdered,
         };
       }
 
@@ -915,13 +1051,71 @@ export class SpotlightTutorialController {
       }
 
       case '4_train_soldiers': {
-        const pt = centerOfSelector('#btn-barracks-train') ?? [viewW * 0.7, 250];
+        const maxMp = Math.floor(p?.manpower ?? 0);
+        const soldierQty = this.readDomInputNumber('#barracks-soldier-qty');
+        const inputW = this.sumDomInputs('.barracks-eq-input[data-eq-cat="weapon"]');
+        const inputS = this.sumDomInputs('.barracks-eq-input[data-eq-cat="shield"]');
+        const swordStock = p?.weaponsStock.sword ?? 0;
+        const woodStock = p?.shieldsStock.wood ?? 0;
+
+        const soldierReady =
+          this.barracksSoldierCountChosen ||
+          soldierQty > 5 ||
+          (maxMp > 0 && soldierQty >= maxMp);
+        const weaponReady = inputW >= Math.min(4, Math.max(1, swordStock));
+        const shieldReady = woodStock <= 0 || inputS >= Math.min(4, woodStock);
+
+        if (!soldierReady) {
+          const sel = '#btn-barracks-max-soldiers';
+          const pt = centerOfSelector(sel) ?? [viewW * 0.54, 270];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            targetSelector: sel,
+            stepBadge: 'Adım 5 / 11',
+            title: '👥 1/4 — Asker Sayısı: MAX',
+            body: 'Önce üretilecek asker sayısı için <b>MAX</b> butonuna tıklayın (Kışla otomatik olarak en kıt ekipman kadar asker çıkarır).',
+            iconUri: getBuildingSpriteDataUri('barracks', pColor),
+          };
+        }
+
+        if (!weaponReady) {
+          const sel = '[data-bar-max="1"][data-target-w="sword"]';
+          const pt = centerOfSelector(sel) ?? [viewW * 0.46, 405];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            targetSelector: sel,
+            stepBadge: 'Adım 5 / 11',
+            title: '⚔️ 2/4 — Silah Seçimi: Kılıç MAX',
+            body: 'Sol sütundaki <b>Kılıç</b> satırında işaretli <b>MAX</b> butonuna tıklayarak stoktaki kılıçları seçin.',
+            iconUri: getBuildingSpriteDataUri('barracks', pColor),
+          };
+        }
+
+        if (!shieldReady) {
+          const sel = '[data-bar-max="1"][data-target-s="wood"]';
+          const pt = centerOfSelector(sel) ?? [viewW * 0.85, 405];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            targetSelector: sel,
+            stepBadge: 'Adım 5 / 11',
+            title: '🛡️ 3/4 — Kalkan Seçimi: Tahta Kalkan MAX',
+            body: 'Sağ sütundaki <b>Tahta Kalkan</b> satırında işaretli <b>MAX</b> butonuna tıklayarak kalkanları da seçin.',
+            iconUri: getBuildingSpriteDataUri('barracks', pColor),
+          };
+        }
+
+        const sel = '#btn-barracks-train';
+        const pt = centerOfSelector(sel) ?? [viewW * 0.76, 270];
         return {
           cx: pt[0],
           cy: pt[1],
+          targetSelector: sel,
           stepBadge: 'Adım 5 / 11',
-          title: '⚔️ İlk Ordunu Yetiştir',
-          body: 'Asker sayısını (veya <code>MAX</code>) belirleyin, alt satırlarda <b>Kılıç</b> ve <b>Kalkan</b> için <code>MAX</code> / <code>+5</code> seçip <b>⚔️ Asker Yetiştir</b> butonuna tıklayın!',
+          title: '⚔️ 4/4 — Asker Yetiştir!',
+          body: 'Asker sayısı, Kılıç ve Kalkan seçildi! Şimdi <b>⚔️ Asker Yetiştir</b> butonuna tıklayarak ilk ordunuzu eğitime alın.',
           iconUri: getBuildingSpriteDataUri('barracks', pColor),
         };
       }
@@ -983,13 +1177,41 @@ export class SpotlightTutorialController {
           return {
             cx: mergeBtnPt[0],
             cy: mergeBtnPt[1],
+            targetSelector: '#btn-multi-merge',
             stepBadge: 'Adım 7 / 11',
             title: '🔗 Seçilenleri Birleştir!',
             body: 'Süper! Sağ altta açılan çoklu ordu panelindeki <b>🔗 Seçilenleri Birleştir</b> butonuna tıklayın.',
             iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
           };
         }
-        const a = this.getPlayerArmies(pid)[0];
+        if (this.ui.activeWindow === 'army') {
+          const modalMergePt = centerOfSelector('.btn-merge-army');
+          if (modalMergePt) {
+            return {
+              cx: modalMergePt[0],
+              cy: modalMergePt[1],
+              targetSelector: '.btn-merge-army',
+              stepBadge: 'Adım 7 / 11',
+              title: '🔗 Yakın Kümeyle Birleştir!',
+              body: 'Ordu penceresindeki <b>🔗 Yakın Kümeyle Birleştir</b> butonuna tıklayın.',
+              iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
+            };
+          }
+        }
+        const myArmies = this.getPlayerArmies(pid);
+        if (this.state.selectedArmyId) {
+          const other = myArmies.find((x) => x.id !== this.state.selectedArmyId) ?? myArmies[0];
+          const pt = other ? screenOfMap([other.x, other.y]) : [viewW * 0.5, viewH * 0.5];
+          return {
+            cx: pt[0],
+            cy: pt[1],
+            stepBadge: 'Adım 7 / 11',
+            title: '🔗 Diğer Birliğin Üstüne Tıkla!',
+            body: 'Haritada diğer dost birliğin üzerine sol tıklayarak iki birliği birleştirin.',
+            iconUri: getUnitSpriteDataUri('sword', 'wood', pColor),
+          };
+        }
+        const a = myArmies[0];
         const pt = a ? screenOfMap([a.x, a.y]) : [viewW * 0.5, viewH * 0.5];
         return {
           cx: pt[0],
@@ -1109,13 +1331,15 @@ export class SpotlightTutorialController {
       }
 
       case '9_pick_hospital': {
-        const pt = centerOfSelector('[data-shop-type="hospital"]') ?? [viewW * 0.7, 430];
+        const sel = '[data-shop-type="hospital"]';
+        const pt = centerOfSelector(sel) ?? [viewW * 0.7, 430];
         return {
           cx: pt[0],
           cy: pt[1],
+          targetSelector: sel,
           stepBadge: 'Adım 10 / 11',
           title: '🏥 Hastane (150 💰) Seç',
-          body: 'Hastane hem <b>+%15 sağlık (+2 Manpower/sn)</b> verir hem de yaralıları eski ekipmanlarıyla iyileştirir. <b>Hastane — Haritaya Yerleştir</b>\'e tıklayın.',
+          body: 'Hastane hem <b>+%15 sağlık (+2 Manpower/3sn)</b> verir hem de yaralıları eski ekipmanlarıyla iyileştirir. <b>Hastane — Haritaya Yerleştir</b>\'e tıklayın.',
           iconUri: getBuildingSpriteDataUri('hospital', pColor),
         };
       }
@@ -1229,6 +1453,23 @@ export class SpotlightTutorialController {
     const viewW = typeof window !== 'undefined' ? window.innerWidth : 1280;
     const viewH = typeof window !== 'undefined' ? window.innerHeight : 720;
 
+    // 0. Hidden state: show ONLY top-right restore button while tracking progress silently in background!
+    if (this.hidden) {
+      const compactBadge = this.getStepCompactBadge(this.stage);
+      const sig = `hidden|${this.stage}|${compactBadge}`;
+      if (this.lastRenderedSig === sig) return;
+      this.lastRenderedSig = sig;
+      host.innerHTML = `
+        <button class="pixel-btn tut-restore-top-btn" id="btn-restore-tutorial-task">
+          📖 Tutorial Görevi (${compactBadge})
+        </button>
+      `;
+      host.querySelector('#btn-restore-tutorial-task')?.addEventListener('click', () => {
+        this.show();
+      });
+      return;
+    }
+
     // 1. Live Waiting Task Badge (mask lifted, game flows!)
     if (this.isWaitStage(this.stage)) {
       const badgeText = this.getWaitBadgeText(pid);
@@ -1239,9 +1480,15 @@ export class SpotlightTutorialController {
       host.innerHTML = `
         <div class="tut-live-task-bar" id="tut-live-task-badge">
           <span>${badgeText}</span>
-          <button class="pixel-btn mini-qty-btn" id="btn-skip-spotlight-tutorial">Tutorial'ı Geç ✕</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="pixel-btn mini-qty-btn" id="btn-hide-spotlight-tutorial">— Gizle</button>
+            <button class="pixel-btn mini-qty-btn" id="btn-skip-spotlight-tutorial">Tutorial'ı Geç ✕</button>
+          </div>
         </div>
       `;
+      host.querySelector('#btn-hide-spotlight-tutorial')?.addEventListener('click', () => {
+        this.hide();
+      });
       host.querySelector('#btn-skip-spotlight-tutorial')?.addEventListener('click', () => {
         this.skipOrStop();
         this.callbacks.onFinishKeepPlaying();
@@ -1335,8 +1582,11 @@ export class SpotlightTutorialController {
           </div>
           <hr class="popup-divider" style="margin:6px 0" />
           <div style="margin-bottom:10px">${info.body}</div>
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-            <button class="pixel-btn mini-qty-btn" id="btn-skip-spotlight-tutorial">Tutorial'ı Geç ✕</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;gap:6px;align-items:center">
+              <button class="pixel-btn mini-qty-btn" id="btn-hide-spotlight-tutorial">— Gizle</button>
+              <button class="pixel-btn mini-qty-btn" id="btn-skip-spotlight-tutorial">Tutorial'ı Geç ✕</button>
+            </div>
             ${
               info.showContinueBtn
                 ? `<button class="pixel-btn active-btn" id="btn-tut-step-continue">▶ Devam</button>`
@@ -1352,6 +1602,10 @@ export class SpotlightTutorialController {
         </svg>
       </div>
     `;
+
+    host.querySelector('#btn-hide-spotlight-tutorial')?.addEventListener('click', () => {
+      this.hide();
+    });
 
     host.querySelector('#btn-skip-spotlight-tutorial')?.addEventListener('click', () => {
       this.skipOrStop();
@@ -1387,16 +1641,87 @@ export class SpotlightTutorialController {
         }
       }
     } else {
-      // Ensure card never overlaps the 20px spotlight target circle after actual layout height is measured
+      // Smart non-overlapping placement: place outside open modal when possible, otherwise dock at corner farthest from target & controls!
       const cardEl = host.querySelector<HTMLElement>('.tut-spotlight-card');
       if (cardEl) {
         const cr = cardEl.getBoundingClientRect();
-        const pad = SPOTLIGHT_RADIUS_PX + 18;
-        if (cr.height > 0 && cy >= cr.top - pad && cy <= cr.bottom + pad) {
-          if (cy + pad + cr.height <= viewH - 10) {
-            cardEl.style.top = `${Math.round(cy + pad)}px`;
+        if (cr.height > 0 && cr.width > 0) {
+          const modalEl =
+            typeof document !== 'undefined'
+              ? document.querySelector<HTMLElement>('.modal-window')
+              : null;
+          const mr = modalEl ? modalEl.getBoundingClientRect() : null;
+          const targetEl =
+            info.targetSelector && typeof document !== 'undefined'
+              ? document.querySelector<HTMLElement>(info.targetSelector)
+              : null;
+          const tr = targetEl ? targetEl.getBoundingClientRect() : null;
+
+          const overlapsSpotOrTarget = (l: number, t: number, w: number, h: number): boolean => {
+            const pad = SPOTLIGHT_RADIUS_PX + 20;
+            if (cx >= l - pad && cx <= l + w + pad && cy >= t - pad && cy <= t + h + pad) {
+              return true;
+            }
+            if (tr && tr.width > 0) {
+              if (l < tr.right + 12 && l + w > tr.left - 12 && t < tr.bottom + 12 && t + h > tr.top - 12) {
+                return true;
+              }
+            }
+            return false;
+          };
+
+          if (mr && mr.width > 0 && mr.height > 0) {
+            // Try placing outside the modal first (bottom, right, left, top)
+            const candidates: Array<[number, number]> = [];
+            if (mr.bottom + 10 + cr.height <= viewH - 8) {
+              candidates.push([
+                Math.max(12, Math.min(viewW - cr.width - 12, Math.round(cx - cr.width * 0.5))),
+                Math.round(mr.bottom + 10),
+              ]);
+            }
+            if (mr.right + 10 + cr.width <= viewW - 8) {
+              candidates.push([
+                Math.round(mr.right + 10),
+                Math.max(12, Math.min(viewH - cr.height - 12, Math.round(cy - cr.height * 0.5))),
+              ]);
+            }
+            if (mr.left - 10 - cr.width >= 8) {
+              candidates.push([
+                Math.round(mr.left - 10 - cr.width),
+                Math.max(12, Math.min(viewH - cr.height - 12, Math.round(cy - cr.height * 0.5))),
+              ]);
+            }
+            // Fallback: viewport corners (bottom-left, bottom-right, top-left, top-right) sorted farthest from (cx, cy)
+            const corners: Array<[number, number]> = [
+              [14, viewH - cr.height - 14],
+              [viewW - cr.width - 14, viewH - cr.height - 14],
+              [14, 72],
+              [viewW - cr.width - 14, 72],
+            ];
+            corners.sort(
+              (a, b) =>
+                Math.hypot(b[0] + cr.width * 0.5 - cx, b[1] + cr.height * 0.5 - cy) -
+                Math.hypot(a[0] + cr.width * 0.5 - cx, a[1] + cr.height * 0.5 - cy),
+            );
+            candidates.push(...corners);
+
+            const valid = candidates.find(([l, t]) => !overlapsSpotOrTarget(l, t, cr.width, cr.height));
+            if (valid) {
+              cardEl.style.left = `${valid[0]}px`;
+              cardEl.style.top = `${valid[1]}px`;
+            }
           } else {
-            cardEl.style.top = `${Math.max(10, Math.round(cy - pad - cr.height))}px`;
+            const pad =
+              this.stage === '6_merge_armies' && !info.targetSelector
+                ? SPOTLIGHT_RADIUS_PX + 56
+                : SPOTLIGHT_RADIUS_PX + 20;
+            if (cy >= cr.top - pad && cy <= cr.bottom + pad) {
+              if (cy + pad + cr.height <= viewH - 10) {
+                cardEl.style.top = `${Math.round(cy + pad)}px`;
+              } else {
+                cardEl.style.top = `${Math.max(10, Math.round(cy - pad - cr.height))}px`;
+              }
+            }
           }
         }
       }
@@ -1463,18 +1788,38 @@ export class SpotlightTutorialController {
 
   private installGlobalClickGuard(): void {
     if (typeof window === 'undefined') return;
+
+    const scheduleSync = (ev: Event) => {
+      if (!this.isActive || this.hidden) return;
+      const t = ev.target as HTMLElement | null;
+      if (
+        this.stage === '4_train_soldiers' &&
+        t &&
+        (t.closest('#btn-barracks-max-soldiers') || t.closest('#barracks-soldier-qty'))
+      ) {
+        this.barracksSoldierCountChosen = true;
+      }
+      queueMicrotask(() => {
+        if (this.isActive) this.syncFrame();
+      });
+    };
+    window.addEventListener('click', scheduleSync, true);
+    window.addEventListener('input', scheduleSync, true);
+
     window.addEventListener(
       'mousedown',
       (ev) => {
-        if (!this.isActive || this.isWaitStage(this.stage)) return;
+        if (!this.isActive || this.hidden || this.isWaitStage(this.stage)) return;
         // Always allow right/middle mouse drag panning
         if (ev.button === 1 || ev.button === 2) return;
 
         const target = ev.target as HTMLElement | null;
         if (!target) return;
 
-        // Always allow Tutorial'ı Geç & Tutorial card action buttons
+        // Always allow Tutorial'ı Geç, Gizle, Restore & Tutorial card action buttons
         if (
+          target.closest('#btn-hide-spotlight-tutorial') ||
+          target.closest('#btn-restore-tutorial-task') ||
           target.closest('#btn-skip-spotlight-tutorial') ||
           target.closest('#btn-tut-step-continue') ||
           target.closest('#btn-tut-factory-proceed') ||
@@ -1484,9 +1829,22 @@ export class SpotlightTutorialController {
           return;
         }
 
-        // Map interaction stages: allow canvas clicks (and #btn-multi-merge in 6_merge_armies!)
+        // Never allow accidental Demolish inside tutorial building popups
+        if (target.closest('#btn-demolish-building')) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.triggerWrongClickFlash();
+          return;
+        }
+
+        // Map interaction stages: allow canvas clicks (and merge panels in 6_merge_armies!)
         if (this.isMapInteractionStage(this.stage)) {
-          if (this.stage === '6_merge_armies' && target.closest('#multi-army-panel')) {
+          if (
+            this.stage === '6_merge_armies' &&
+            (target.closest('#multi-army-panel') ||
+              target.closest('.btn-merge-army') ||
+              target.closest('.close-win'))
+          ) {
             return;
           }
           if (target.id === 'map-canvas') {
@@ -1496,6 +1854,44 @@ export class SpotlightTutorialController {
           ev.stopPropagation();
           this.triggerWrongClickFlash();
           return;
+        }
+
+        const pid = this.state.playerCountryId;
+        const p = pid ? this.state.countries[pid] : null;
+
+        // Guard premature Start click in Factory before selecting >=4 weapons & >=4 shields
+        if (this.stage === '3_order_equip' && target.closest('#btn-factory-start') && pid && p) {
+          const activeOrders = getCountryActiveProductionOrders(this.state, pid);
+          const totalW =
+            p.weaponsStock.sword +
+            activeOrders
+              .filter((o) => o.order.category === 'weapon')
+              .reduce((s, o) => s + o.order.remainingCount, 0) +
+            this.sumDomInputs('.factory-eq-input[data-fac-cat="weapon"]');
+          const totalS =
+            p.shieldsStock.wood +
+            activeOrders
+              .filter((o) => o.order.category === 'shield')
+              .reduce((s, o) => s + o.order.remainingCount, 0) +
+            this.sumDomInputs('.factory-eq-input[data-fac-cat="shield"]');
+          if (totalW < 4 || totalS < 4) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.triggerWrongClickFlash();
+            return;
+          }
+        }
+
+        // Guard premature Train click in Barracks before selecting weapons & shields
+        if (this.stage === '4_train_soldiers' && target.closest('#btn-barracks-train') && p) {
+          const inputW = this.sumDomInputs('.barracks-eq-input[data-eq-cat="weapon"]');
+          const inputS = this.sumDomInputs('.barracks-eq-input[data-eq-cat="shield"]');
+          if (inputW < 2 || (p.shieldsStock.wood > 0 && inputS < Math.min(2, p.shieldsStock.wood))) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            this.triggerWrongClickFlash();
+            return;
+          }
         }
 
         const allowedSel = this.getAllowedSelectorForStage(this.stage);

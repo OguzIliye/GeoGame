@@ -3,8 +3,8 @@
 > [UPDATE_DESIGN_V1_3.md](UPDATE_DESIGN_V1_3.md) kapsamındaki 5 aşamanın ilerleme durumu.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 3 — Daha Az Agresif AI & Barışta Maks. 2 Birlik Kuralı
-- **Tamamlanan Aşamalar:** 3 / 5
+- **Aktif Aşama:** Aşama 4 — Tutorial Gizle/Aç, Sağ Üst Buton & Alt-Hedefli Çakışmasız Spotlight
+- **Tamamlanan Aşamalar:** 4 / 5
 - **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
 
 ---
@@ -26,10 +26,10 @@
 - [x] Aşama 3 testler + temiz build + git commit
 
 ## Aşama 4 — Tutorial Gizle/Aç, Sağ Üst Buton & Alt-Hedefli Çakışmasız Spotlight
-- [ ] Spotlight kartı ve bekleme rozetine `— Gizle` butonu + sağ üst `📖 Tutorial Görevi (Adım X/11)` geri açma butonu
-- [ ] Fabrika (`Kılıç +5` → `Tahta Kalkan +5` → `Üretimi Başlat`) ve Kışla (`Asker MAX` → `Kılıç MAX` → `Kalkan MAX` → `Asker Yetiştir`) alt hedefleri
-- [ ] Spotlight açıklama kartının tıklanabilir modal butonlarının üstünü kapatmaması
-- [ ] Aşama 4 testler + temiz build + git commit
+- [x] Spotlight kartı ve bekleme rozetine `— Gizle` butonu + sağ üst `📖 Tutorial Görevi (Adım X/11)` geri açma butonu
+- [x] Fabrika (`Kılıç +5` → `Tahta Kalkan +5` → `Üretimi Başlat`) ve Kışla (`Asker MAX` → `Kılıç MAX` → `Kalkan MAX` → `Asker Yetiştir`) alt hedefleri
+- [x] Spotlight açıklama kartının tıklanabilir modal butonlarının üstünü kapatmaması
+- [x] Aşama 4 testler + temiz build + git commit
 
 ## Aşama 5 — Kapsamlı v1.3 Testleri, Clean Build & Gerçek Chrome Uçtan Uca Doğrulama
 - [ ] Tüm v1.3 birim testleri + temiz `npm test` ve `npm run build`
