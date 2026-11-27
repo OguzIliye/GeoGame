@@ -17,14 +17,3 @@
 - **Sağ / Orta Tık Sürükle** veya **WASD / Ok Tuşları:** Haritayı kaydır • **Tekerlek:** Yakınlaştır/Uzaklaştır
 - **Sağ Tık:** İptal • **Space:** Duraklat/Devam • **Q:** Ordulara odaklan
 
-## Yerelde Çalıştırma
-
-```bash
-npm install
-npm run dev
-```
-
-```bash
-npm test       # Birim testleri
-npm run build  # Üretim derlemesi
-```
