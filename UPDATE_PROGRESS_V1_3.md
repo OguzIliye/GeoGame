@@ -3,9 +3,9 @@
 > [UPDATE_DESIGN_V1_3.md](UPDATE_DESIGN_V1_3.md) kapsamındaki 5 aşamanın ilerleme durumu.
 
 ## Genel Durum
-- **Aktif Aşama:** Aşama 4 — Tutorial Gizle/Aç, Sağ Üst Buton & Alt-Hedefli Çakışmasız Spotlight
-- **Tamamlanan Aşamalar:** 4 / 5
-- **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [ ] Bekliyor
+- **Aktif Aşama:** Tamamlandı (Pixel World v1.3 Hazır)
+- **Tamamlanan Aşamalar:** 5 / 5
+- **Son Doğrulama (Test + Clean Build + Gerçek Chrome Uçtan Uca Kontrol):** [x] Tamamlandı
 
 ---
 
@@ -32,5 +32,5 @@
 - [x] Aşama 4 testler + temiz build + git commit
 
 ## Aşama 5 — Kapsamlı v1.3 Testleri, Clean Build & Gerçek Chrome Uçtan Uca Doğrulama
-- [ ] Tüm v1.3 birim testleri + temiz `npm test` ve `npm run build`
-- [ ] Gerçek Chrome'da uçtan uca doğrulama + final `UPDATE_PROGRESS_V1_3.md` + final git commit
+- [x] Tüm v1.3 birim testleri + temiz `npm test` ve `npm run build`
+- [x] Gerçek Chrome'da uçtan uca doğrulama + final `UPDATE_PROGRESS_V1_3.md` + final git commit
